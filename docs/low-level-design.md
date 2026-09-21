@@ -6,6 +6,7 @@
 src/agentlatch/
   models.py          Strict Pydantic transport and workflow models
   coordinator.py     SQLite transactions, leases, versions, receipts, audit log
+  policies.py        Deterministic workflow-scoped conservation invariants
   engine.py          DAG scheduling and bounded attempt/retry execution
   planners.py        Offline simulator and cancellable subprocess adapter
   crew_worker.py     CrewAI Agent / Task / Crew construction and LLM configuration
@@ -61,7 +62,7 @@ Inside one `BEGIN IMMEDIATE` transaction:
 4. Require all write keys to appear in the read set.
 5. For every read key, check lease owner, token, expiry, and both resource versions.
 6. Validate all proposed values against current or proposed JSON Schema before changing anything.
-7. Hash input state and proposed output independently of version counters. Reject excessive repeats.
+7. Enforce configured conservation invariants over current and fully proposed state. Hash input state and proposed output independently of version counters. Reject excessive repeats.
 8. Update resources and version counters. Insert receipt and transition count, mark attempt committed, append event.
 9. Commit the transaction. On error, roll back; record a rejection in a separate transaction.
 

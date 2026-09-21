@@ -49,6 +49,7 @@ Set `AGENTLATCH_MODEL` and the relevant provider key in `.env`. Set `AGENTLATCH_
 ## What is implemented
 
 - Consistent snapshots with data and schema version stamps; atomic multi-resource commits.
+- Deterministic conservation invariants that reject inventory creation/loss across transfers.
 - All-or-nothing leases, monotonic fencing tokens, expiry, and stale-writer rejection.
 - Durable idempotency receipts, event history, attempt budgets, deadlines, and repeated-transition limits.
 - DAG validation, asynchronous independent tasks, bounded conflict retries with fresh snapshots, and recovery of interrupted runs.

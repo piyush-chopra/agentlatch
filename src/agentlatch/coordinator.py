@@ -11,9 +11,19 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator, SchemaError, ValidationError
+from referencing.exceptions import Unresolvable
 
 from .errors import CoordinationError
-from .models import Commit, Lease, LeaseRequest, Resource, ResourceCreate, WorkflowCreate
+from .models import (
+    Commit,
+    ConservationRule,
+    Lease,
+    LeaseRequest,
+    Resource,
+    ResourceCreate,
+    WorkflowCreate,
+)
+from .policies import enforce_conservation
 
 
 def canonical(value: Any) -> str:
@@ -45,7 +55,14 @@ def validate_value(value: dict, schema: dict):
         check_refs(schema)
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(value)
-    except (SchemaError, ValidationError, ValueError, TypeError, RecursionError) as exc:
+    except (
+        SchemaError,
+        ValidationError,
+        Unresolvable,
+        ValueError,
+        TypeError,
+        RecursionError,
+    ) as exc:
         raise CoordinationError("schema_violation", str(exc)[:1000], 422) from exc
 
 
@@ -375,6 +392,11 @@ class Coordinator:
                             schema_version=old.schema_version + int(changed_schema),
                         )
                     )
+                rules = [
+                    ConservationRule.model_validate(rule)
+                    for rule in json.loads(workflow["specification"]).get("invariants", [])
+                ]
+                enforce_conservation(rules, current, {r.key: r for r in prepared})
                 transition = digest(
                     {
                         "reads": {

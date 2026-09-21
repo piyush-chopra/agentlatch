@@ -24,13 +24,6 @@ class Engine:
     async def run(self, spec: WorkflowSpec, run_id: str | None = None) -> dict:
         run_id = run_id or f"run-{uuid.uuid4().hex[:12]}"
         c = self.coordinator
-        # Bootstrap only absent resources; existing state is always authoritative.
-        for resource in spec.resources:
-            try:
-                c.create_resource(resource)
-            except CoordinationError as exc:
-                if exc.code != "resource_exists":
-                    raise
         workflow = c.create_workflow(
             WorkflowCreate(
                 id=run_id,
@@ -45,6 +38,13 @@ class Engine:
         outcomes = {}
         pending = list(spec.tasks)
         try:
+            # Bootstrap only absent resources; existing state is always authoritative.
+            for resource in spec.resources:
+                try:
+                    c.create_resource(resource)
+                except CoordinationError as exc:
+                    if exc.code != "resource_exists":
+                        raise
             while pending:
                 ready = [
                     t

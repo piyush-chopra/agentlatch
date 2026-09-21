@@ -1,0 +1,9 @@
+{
+  "name": "Inventory transfer with conservation invariant",
+  "resources": [
+    {"key": "warehouse-a", "value": {"count": 20}, "json_schema": {"type": "object", "properties": {"count": {"type": "integer", "minimum": 0}}, "required": ["count"], "additionalProperties": false}},
+    {"key": "warehouse-b", "value": {"count": 0}, "json_schema": {"type": "object", "properties": {"count": {"type": "integer", "minimum": 0}}, "required": ["count"], "additionalProperties": false}}
+  ],
+  "invariants": [{"id": "stock-conservation", "kind": "conserve_total", "resources": ["warehouse-a", "warehouse-b"], "field": "count"}],
+  "tasks": [{"id": "transfer-agent", "role": "Stock transfer specialist", "goal": "Move exactly 3 units of count from warehouse-a to warehouse-b, preserving the combined total and schemas.", "reads": ["warehouse-a", "warehouse-b"], "writes": ["warehouse-a", "warehouse-b"], "action": "transfer", "amount": 3}]
+}

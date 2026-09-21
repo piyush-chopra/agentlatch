@@ -23,6 +23,9 @@ class ScriptedPlanner:
                 if field not in value and field == "count" and "available" in value:
                     field = "available"
                 value[field] = value.get(field, 0) + task.amount
+            elif task.action == "transfer":
+                delta = -task.amount if key == task.writes[0] else task.amount
+                value[task.field] += delta
             elif task.action == "migrate":
                 value["available"] = value.pop("count")
                 schema = {

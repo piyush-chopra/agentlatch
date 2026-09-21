@@ -240,3 +240,11 @@ def test_invalid_attempt_and_blind_write(c):
     with pytest.raises(CoordinationError) as exc:
         commit_release(c, req)
     assert exc.value.code == "blind_write"
+
+
+def test_unresolvable_local_schema_is_domain_error(c):
+    with pytest.raises(CoordinationError) as exc:
+        c.create_resource(
+            ResourceCreate(key="broken", value={}, json_schema={"$ref": "#/$defs/missing"})
+        )
+    assert exc.value.code == "schema_violation"

@@ -69,3 +69,26 @@ async def test_resume_skips_committed_task(tmp_path):
     assert result["status"] == "completed"
     assert result["tasks"][spec.tasks[0].id]["cached"]
     assert next(iter(c.snapshot().values())).value == {"count": 14}
+
+
+async def test_transfer_workflow_preserves_total(tmp_path):
+    from pathlib import Path
+
+    spec = WorkflowSpec.model_validate_json(Path("examples/transfer.json").read_text())
+    c = Coordinator(tmp_path / "transfer.db")
+    result = await Engine(c, ScriptedPlanner()).run(spec)
+    assert result["status"] == "completed"
+    values = {k: r.value["count"] for k, r in c.snapshot().items()}
+    assert values == {"warehouse-a": 17, "warehouse-b": 3}
+
+
+async def test_mismatched_run_does_not_bootstrap_new_resources(tmp_path):
+    from agentlatch.errors import CoordinationError
+
+    c = Coordinator(tmp_path / "identity.db")
+    spec = demo_spec("race")
+    await Engine(c, ScriptedPlanner()).run(spec, "same")
+    changed = spec.model_copy(update={"resources": [ResourceCreate(key="unwanted", value={})]})
+    with pytest.raises(CoordinationError):
+        await Engine(c, ScriptedPlanner()).run(changed, "same")
+    assert "unwanted" not in c.snapshot()

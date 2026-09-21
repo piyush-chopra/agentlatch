@@ -74,12 +74,34 @@ class Commit(Model):
     attempt_id: int = Field(ge=1)
 
 
+class ConservationRule(Model):
+    id: Key
+    kind: Literal["conserve_total"] = "conserve_total"
+    resources: list[Key] = Field(min_length=2, max_length=64)
+    field: str = Field(min_length=1, max_length=160)
+
+    @model_validator(mode="after")
+    def unique_resources(self):
+        if len(set(self.resources)) != len(self.resources):
+            raise ValueError("Invariant resources must be unique")
+        return self
+
+
 class WorkflowCreate(Model):
     id: Key
     max_steps: int = Field(default=30, ge=1, le=10000)
     timeout_seconds: float = Field(default=300, gt=0, le=86400)
     repeat_limit: int = Field(default=3, ge=1, le=100)
     specification: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_invariants(self):
+        rules = self.specification.get("invariants", [])
+        if not isinstance(rules, list) or len(rules) > 32:
+            raise ValueError("invariants must be a list of at most 32 rules")
+        for rule in rules:
+            ConservationRule.model_validate(rule)
+        return self
 
 
 class TaskSpec(Model):
@@ -91,12 +113,14 @@ class TaskSpec(Model):
     depends_on: list[Key] = Field(default_factory=list)
     max_attempts: int = Field(default=4, ge=1, le=20)
     # Deterministic actions power offline examples; CrewAI uses the natural-language goal.
-    action: Literal["increment", "migrate", "copy", "noop"] = "noop"
+    action: Literal["increment", "migrate", "copy", "transfer", "noop"] = "noop"
     field: str = "count"
     amount: int = 1
 
     @model_validator(mode="after")
     def scope(self):
+        if self.action == "transfer" and len(self.writes) != 2:
+            raise ValueError("Transfer requires exactly two ordered write targets")
         if not set(self.writes) <= set(self.reads):
             raise ValueError("All writes must also appear in reads")
         if len(set(self.reads)) != len(self.reads):
@@ -105,6 +129,7 @@ class TaskSpec(Model):
 
 
 class WorkflowSpec(Model):
+    invariants: list[ConservationRule] = Field(default_factory=list, max_length=32)
     name: str = Field(min_length=1, max_length=200)
     resources: list[ResourceCreate] = Field(default_factory=list)
     tasks: list[TaskSpec] = Field(min_length=1, max_length=100)
@@ -114,6 +139,16 @@ class WorkflowSpec(Model):
 
     @model_validator(mode="after")
     def acyclic(self):
+        if len({r.id for r in self.invariants}) != len(self.invariants):
+            raise ValueError("Invariant IDs must be unique")
+        for task in self.tasks:
+            for rule in self.invariants:
+                if set(task.writes).intersection(rule.resources) and not set(rule.resources) <= set(
+                    task.reads
+                ):
+                    raise ValueError(
+                        f"Task {task.id} must read all resources of invariant {rule.id}"
+                    )
         ids = {t.id for t in self.tasks}
         if len(ids) != len(self.tasks):
             raise ValueError("Task IDs must be unique")

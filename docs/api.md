@@ -103,6 +103,7 @@ Domain errors return `{"code":"…","message":"…"}`. Invalid request shapes us
 | workflow_mismatch / run_active | 409 | Correct run ID / specification or wait |
 | resource_exists | 409 | Read existing state; do not overwrite initialization |
 | resource_missing / workflow_missing | 404 | Initialize missing identifiers |
+| invariant_violation / incomplete_policy_reads | 422 | Correct the transfer and include every invariant dependency |
 | schema_violation / invalid_schema / scope_violation | 422 | Correct plan or schema |
 | crew_disabled | 422 | Configure server opt-in |
 | unauthorized | 401 | Supply configured bearer token |

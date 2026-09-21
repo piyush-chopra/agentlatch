@@ -53,7 +53,7 @@ These guarantees apply to code paths through this coordinator. External SQL writ
 
 Each snapshot includes authoritative JSON Schema and a `schema_version`. If another agent migrates the contract during planning, the older proposal is rejected. The retry receives current values and schema and plans again. A schema migration must supply data that validates against the replacement schema in the same transaction.
 
-This detects changed context; it does not prove the agent understood the contract or chose a sensible action. JSON Schema validates structure and configured constraints. Cross-resource business invariants, contract compatibility checks, authorization policies, and domain-specific correctness checks require additional deterministic validators.
+This detects changed context; it does not prove the agent understood the contract or chose a sensible action. JSON Schema validates structure and configured constraints. Optional workflow conservation invariants additionally enforce unchanged integer totals across multiple resources in the commit transaction. General business rules, contract compatibility checks, and authorization policies need further deterministic validators.
 
 ## Concurrency model
 

@@ -17,6 +17,7 @@ uv run --extra crew agentlatch run examples/inventory.json --mode crew
 | max_steps | 30 | Workflow attempt budget, 1–10,000 |
 | timeout_seconds | 300 | Absolute execution deadline from first creation, up to 86,400 |
 | repeat_limit | 3 | Maximum identical state transition repetitions |
+| invariants | `[]` | Up to 32 deterministic conservation rules |
 
 Re-running with a new run ID operates on **existing** resources; initialization does not reset them. Demo resource keys are randomized so demonstrations remain isolated. Resource deletion and reset are deliberately absent.
 
@@ -31,7 +32,7 @@ Re-running with a new run ID operates on **existing** resources; initialization 
 | writes | `[]` | Exact permitted/required replacement targets |
 | depends_on | `[]` | IDs that must commit first |
 | max_attempts | 4 | Durable task-level cap, up to 20 |
-| action | noop | Offline simulator: increment, migrate, copy, noop |
+| action | noop | Offline simulator: increment, migrate, copy, transfer, noop |
 | field | count | Offline increment field name |
 | amount | 1 | Offline increment amount |
 
@@ -62,3 +63,15 @@ uv run agentlatch run examples/inventory.json --run-id stable-run-001
 ```
 
 Committed task receipts are skipped. Pending attempts remain charged. Existing task attempt counts, shared budget, and original absolute deadline are preserved. A completed/failed/cancelled run ID is terminal. A new run ID intentionally starts new logical operations; it can repeat business actions, so choose IDs carefully.
+
+## Deterministic conservation rules
+
+Run `uv run agentlatch run examples/transfer.json` to move stock atomically between warehouses. Add this to a workflow:
+
+```json
+{"invariants":[{"id":"stock-conservation","kind":"conserve_total","resources":["warehouse-a","warehouse-b"],"field":"count"}]}
+```
+
+Any task writing a participating resource must read **all** resources in the rule. The coordinator checks the integer total before and after the complete proposed write set inside the same transaction. Missing dependencies, non-integer fields, and changed totals are rejected without partial writes. Unchanged resources contribute their current values. JSON Schema can separately prohibit negative inventory.
+
+The scripted `transfer` action subtracts `amount` from `writes[0]` and adds it to `writes[1]`, using `field`. Real agents follow their natural-language goal. Rules live in the immutable persisted workflow specification; model plans cannot alter them. These are workflow-scoped controls, not a database-wide authorization policy: another trusted workflow without a rule is not bound by it.

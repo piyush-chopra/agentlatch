@@ -11,10 +11,11 @@
 - [x] CrewAI structured proposal adapter; local/cloud provider configuration.
 - [x] Reproducible offline schema and lost-update demonstrations.
 - [x] API, CLI, tests, architecture/flow/LLD docs, and container/CI definitions.
+- [x] Deterministic workflow conservation invariants with complete dependency checking.
 
 ## Next: stronger domain correctness
 
-The current protocol prevents stale writes, not bad reasoning. Add deterministic domain policies (allowed migrations, cross-resource invariants, allowed numeric deltas), integration tests for write skew, and adversarial proposal evaluation. Policies must run within the same commit transaction against the fully proposed state. Model-generated policy exceptions must not override them.
+The protocol prevents stale writes and now enforces configured integer conservation rules. Extend deterministic domain policies (allowed migrations, richer cross-resource invariants, allowed numeric deltas), integration tests for write skew, and adversarial proposal evaluation. Policies must run within the same commit transaction against the fully proposed state. Model-generated policy exceptions must not override them.
 
 ## Next: durable distributed execution
 
