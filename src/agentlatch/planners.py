@@ -7,6 +7,7 @@ import os
 import sys
 
 from .models import Plan, Write
+from .runtime import require_runtime
 
 
 class ScriptedPlanner:
@@ -48,6 +49,7 @@ class CrewPlanner:
     """One isolated CrewAI worker per attempt; cancellation terminates inference locally."""
 
     async def plan(self, task, snapshot):
+        await asyncio.to_thread(require_runtime)
         payload = json.dumps(
             {
                 "task": task.model_dump(),

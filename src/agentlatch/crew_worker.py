@@ -12,12 +12,17 @@ from .models import Plan
 def build_llm():
     from crewai import LLM
 
-    model = os.getenv("AGENTLATCH_MODEL", "ollama/llama3.2")
-    options = {"model": model, "temperature": 0, "timeout": 90, "max_tokens": 4096}
+    model = os.getenv("AGENTLATCH_MODEL", "ollama_chat/gemma4:31b-cloud")
+    options = {"model": model, "temperature": 0, "timeout": 180, "max_tokens": 2048}
+    if model.startswith(("ollama/", "ollama_chat/")):
+        options["is_litellm"] = True
+        options["reasoning_effort"] = "none"
+        if not model.endswith("-cloud"):
+            options["num_ctx"] = 8192
     base_url = os.getenv("AGENTLATCH_BASE_URL")
     if base_url:
         options["base_url"] = base_url
-    elif model.startswith("ollama/"):
+    elif model.startswith(("ollama/", "ollama_chat/")):
         options["base_url"] = "http://localhost:11434"
     # Explicit mapping also supports endpoints that speak the OpenAI API protocol.
     key_env = os.getenv("AGENTLATCH_API_KEY_ENV")
@@ -54,7 +59,7 @@ def produce(payload: dict) -> Plan:
         allow_delegation=False,
         max_iter=3,
         max_retry_limit=1,
-        max_execution_time=100,
+        max_execution_time=200,
         verbose=False,
         tools=[],
     )
@@ -75,9 +80,39 @@ def produce(payload: dict) -> Plan:
         output_pydantic=Plan,
         guardrail_max_retries=1,
     )
+    reviewer = Agent(
+        role="State consistency reviewer",
+        goal="Check the specialist's proposal against its goal and the authoritative snapshot; return a corrected, minimal Plan.",
+        backstory="You verify exact resource keys, arithmetic, schema constraints, and complete replacement values. You never commit state.",
+        llm=build_llm(),
+        allow_delegation=False,
+        max_iter=3,
+        max_retry_limit=1,
+        max_execution_time=200,
+        verbose=False,
+        tools=[],
+    )
+    review = Task(
+        description=(
+            "Review the specialist's proposed plan. Correct any mistake. Do not apply the requested change twice: "
+            "calculate the final replacement values from the ORIGINAL snapshot, not from the proposed values. "
+            "Preserve JSON schemas unless the goal requests migration. Return the final Plan JSON only. "
+            "Exact write keys: "
+            + json.dumps(spec["writes"])
+            + ". Goal: "
+            + spec["goal"]
+            + "\nORIGINAL snapshot: "
+            + json.dumps(payload["snapshot"])
+        ),
+        expected_output="A final validated JSON Plan with writes and rationale, not a review essay.",
+        agent=reviewer,
+        context=[task],
+        output_pydantic=Plan,
+        guardrail_max_retries=1,
+    )
     crew = Crew(
-        agents=[agent],
-        tasks=[task],
+        agents=[agent, reviewer],
+        tasks=[task, review],
         process=Process.sequential,
         memory=False,
         cache=False,

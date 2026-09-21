@@ -19,6 +19,7 @@ from .engine import Engine
 from .errors import CoordinationError
 from .models import Commit, LeaseRequest, Model, ResourceCreate, WorkflowCreate, WorkflowSpec
 from .planners import CrewPlanner, ScriptedPlanner
+from .runtime import require_runtime, runtime_status
 
 
 class RunRequest(Model):
@@ -69,6 +70,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def health():
         return {"status": "ok", "version": "0.1.0"}
 
+    @app.get("/api/runtime", dependencies=auth)
+    def runtime():
+        return runtime_status()
+
     @app.get("/api/state", dependencies=auth)
     def state():
         return coordinator.state()
@@ -115,6 +120,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             raise CoordinationError(
                 "crew_disabled", "Set AGENTLATCH_ENABLE_CREW=true to enable LLM-backed runs", 422
             )
+        if body.mode == "crew":
+            await asyncio.to_thread(require_runtime)
         run_id = body.run_id or f"run-{uuid.uuid4().hex[:12]}"
         if run_id in jobs and not jobs[run_id].done():
             raise CoordinationError("run_active", "This run is already executing")
@@ -153,7 +160,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.post("/api/demos", dependencies=auth, status_code=202)
     async def demo(body: DemoRequest):
-        return await launch(RunRequest(spec=demo_spec(body.scenario), mode=body.mode))
+        spec = demo_spec(body.scenario)
+        if body.mode == "crew":
+            spec = spec.model_copy(update={"timeout_seconds": 900})
+        return await launch(RunRequest(spec=spec, mode=body.mode))
 
     @app.get("/api/runs/{run_id}", dependencies=auth)
     def run_status(run_id: str):

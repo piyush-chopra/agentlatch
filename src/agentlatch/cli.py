@@ -48,6 +48,8 @@ def main():
         if args.command == "demo"
         else WorkflowSpec.model_validate_json(args.file.read_text())
     )
+    if args.command == "demo" and args.mode == "crew":
+        spec = spec.model_copy(update={"timeout_seconds": 900})
     planner = CrewPlanner() if args.mode == "crew" else ScriptedPlanner()
     result = asyncio.run(Engine(coordinator, planner).run(spec, getattr(args, "run_id", None)))
     print(json.dumps(result, indent=2))
