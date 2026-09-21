@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentlatch"
+version = "0.1.0"
+description = "A deterministic state coordinator for asynchronous AI agents"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "Apache-2.0"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "pydantic>=2.10,<3",
+  "jsonschema>=4.23,<5", "python-dotenv>=1.0,<2",
+]
+
+[project.urls]
+Repository = "https://github.com/piyush-chopra/agentlatch"
+Issues = "https://github.com/piyush-chopra/agentlatch/issues"
+
+[project.optional-dependencies]
+crew = ["crewai[litellm,anthropic,google-genai]>=1.0,<2"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "httpx>=0.28,<1", "ruff>=0.11,<1"]
+
+[project.scripts]
+agentlatch = "agentlatch.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

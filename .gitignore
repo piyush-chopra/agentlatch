@@ -1,0 +1,16 @@
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+*.db
+*.db-shm
+*.db-wal
+.agentlatch/
+dist/
+.DS_Store
+frontend/node_modules/
+frontend/*.tsbuildinfo
+src/agentlatch/static/assets/
+src/agentlatch/static/index.html

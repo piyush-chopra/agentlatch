@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+Key = Annotated[str, Field(min_length=1, max_length=160, pattern=r"^[a-zA-Z0-9_.:/-]+$")]
+
+
+class Model(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class Stamp(Model):
+    version: int = Field(ge=1)
+    schema_version: int = Field(ge=1)
+
+
+class Resource(Model):
+    key: Key
+    value: dict[str, Any]
+    json_schema: dict[str, Any]
+    version: int
+    schema_version: int
+
+    @property
+    def stamp(self) -> Stamp:
+        return Stamp(version=self.version, schema_version=self.schema_version)
+
+
+class ResourceCreate(Model):
+    key: Key
+    value: dict[str, Any]
+    json_schema: dict[str, Any] = Field(default_factory=lambda: {"type": "object"})
+
+
+class Write(Model):
+    key: Key
+    value: dict[str, Any]
+    json_schema: dict[str, Any] | None = None
+
+
+class Plan(Model):
+    writes: list[Write] = Field(max_length=64)
+    rationale: str = Field(default="", max_length=4000)
+
+    @model_validator(mode="after")
+    def unique_writes(self):
+        if len({w.key for w in self.writes}) != len(self.writes):
+            raise ValueError("Each resource may be written only once in a plan")
+        return self
+
+
+class LeaseRequest(Model):
+    owner: Key
+    resources: list[Key] = Field(min_length=1, max_length=64)
+    ttl_seconds: float = Field(default=15, ge=0.05, le=300)
+
+
+class Lease(Model):
+    owner: str
+    token: int
+    resources: list[str]
+    expires_at: float
+
+
+class Commit(Model):
+    workflow_id: Key
+    operation_id: Key
+    owner: Key
+    lease_token: int = Field(ge=1)
+    reads: dict[Key, Stamp] = Field(min_length=1, max_length=64)
+    plan: Plan
+    attempt_id: int = Field(ge=1)
+
+
+class WorkflowCreate(Model):
+    id: Key
+    max_steps: int = Field(default=30, ge=1, le=10000)
+    timeout_seconds: float = Field(default=300, gt=0, le=86400)
+    repeat_limit: int = Field(default=3, ge=1, le=100)
+    specification: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskSpec(Model):
+    id: Key
+    role: str = Field(min_length=1, max_length=500)
+    goal: str = Field(min_length=1, max_length=8000)
+    reads: list[Key] = Field(min_length=1, max_length=64)
+    writes: list[Key] = Field(default_factory=list, max_length=64)
+    depends_on: list[Key] = Field(default_factory=list)
+    max_attempts: int = Field(default=4, ge=1, le=20)
+    # Deterministic actions power offline examples; CrewAI uses the natural-language goal.
+    action: Literal["increment", "migrate", "copy", "noop"] = "noop"
+    field: str = "count"
+    amount: int = 1
+
+    @model_validator(mode="after")
+    def scope(self):
+        if not set(self.writes) <= set(self.reads):
+            raise ValueError("All writes must also appear in reads")
+        if len(set(self.reads)) != len(self.reads):
+            raise ValueError("Duplicate reads are not allowed")
+        return self
+
+
+class WorkflowSpec(Model):
+    name: str = Field(min_length=1, max_length=200)
+    resources: list[ResourceCreate] = Field(default_factory=list)
+    tasks: list[TaskSpec] = Field(min_length=1, max_length=100)
+    max_steps: int = Field(default=30, ge=1, le=10000)
+    timeout_seconds: float = Field(default=300, gt=0, le=86400)
+    repeat_limit: int = Field(default=3, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def acyclic(self):
+        ids = {t.id for t in self.tasks}
+        if len(ids) != len(self.tasks):
+            raise ValueError("Task IDs must be unique")
+        if len({r.key for r in self.resources}) != len(self.resources):
+            raise ValueError("Resource keys must be unique")
+        completed: set[str] = set()
+        pending = list(self.tasks)
+        while pending:
+            ready = [t for t in pending if set(t.depends_on) <= completed]
+            if not ready:
+                raise ValueError("Workflow contains a dependency cycle or an unknown dependency")
+            completed.update(t.id for t in ready)
+            pending = [t for t in pending if t.id not in completed]
+        return self
