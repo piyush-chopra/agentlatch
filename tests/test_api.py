@@ -35,3 +35,37 @@ def test_bearer_auth(tmp_path, monkeypatch):
             client.get("/api/state", headers={"Authorization": "Bearer test-token"}).status_code
             == 200
         )
+
+
+def test_handoff_api_and_observability(tmp_path):
+    with TestClient(create_app(str(tmp_path / "handoff.db"))) as client:
+        response = client.post("/api/demos/handoff")
+        assert response.status_code == 202
+        run_id = response.json()["id"]
+        for _ in range(100):
+            run = client.get(f"/api/runs/{run_id}").json()
+            if run["status"] != "running":
+                break
+            time.sleep(0.03)
+        assert run["status"] == "completed"
+        assert set(run["task_outcomes"]) == {"producer", "reviewer"}
+        deliveries = client.get("/api/deliveries").json()
+        assert {d["kind"]: d["status"] for d in deliveries} == {
+            "message": "delivered",
+            "effect": "pending",
+        }
+        assert client.get("/api/executions").json()["backend"] == "sqlite"
+        claim = client.post(
+            "/api/deliveries/claim",
+            json={"kind": "effect", "destination": "inventory-notifications", "owner": "test"},
+        ).json()
+        ack = {k: claim[k] for k in ["id", "owner", "token"]}
+        assert client.post("/api/deliveries/ack", json=ack).status_code == 200
+        assert client.post("/api/deliveries/ack", json={**ack, "token": 999}).status_code == 409
+        assert (
+            client.post(
+                "/api/channels",
+                json={"destination": "broken", "kind": "message", "json_schema": {"type": "wrong"}},
+            ).status_code
+            == 422
+        )

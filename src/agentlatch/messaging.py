@@ -55,6 +55,16 @@ class Messaging:
             raise CoordinationError(
                 "scope_violation", "Envelope destination is not declared by the task", 422
             )
+        if task:
+            actual = {(e.id, e.kind, e.destination, e.schema_version) for e in envelopes}
+            required = {
+                (e["id"], e.get("kind", "message"), e["destination"], e.get("schema_version", 1))
+                for e in task.get("emits", [])
+            }
+            if not required <= actual:
+                raise CoordinationError(
+                    "scope_violation", "Proposal omitted a required envelope", 422
+                )
         ids = []
         for envelope in envelopes:
             channel = db.execute(

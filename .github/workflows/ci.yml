@@ -39,3 +39,24 @@ jobs:
         env:
           OTEL_SDK_DISABLED: 'true'
           CREWAI_TELEMETRY_DISABLED: 'true'
+
+  postgres-reliability:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --extra postgres --group dev
+      - run: uv run --extra postgres pytest tests/test_reliability.py -q
+        env:
+          AGENTLATCH_TEST_POSTGRES: postgresql://postgres:test-only-password@localhost:5432/postgres

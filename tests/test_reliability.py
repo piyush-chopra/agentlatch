@@ -375,3 +375,58 @@ def test_schema_allowlist_blocks_unauthorized_migration(store):
         store.commit(req)
     assert exc.value.code == "invariant_violation"
     assert store.snapshot()[key].schema_version == 1
+
+
+def killed_transaction(path, key, signal):
+    c = Coordinator(path)
+    with c.transaction() as db:
+        db.execute("UPDATE resources SET value=? WHERE key=?", ('{"count":999}', key))
+        c.event(db, "run", "uncommitted_event", {})
+        signal.put(True)
+        time.sleep(60)
+
+
+async def test_process_kill_inside_transaction_rolls_back(store):
+    import multiprocessing
+
+    spec = setup_run(store)
+    key = spec.tasks[0].writes[0]
+    ctx = multiprocessing.get_context("spawn")
+    signal = ctx.Queue()
+    child = ctx.Process(target=killed_transaction, args=(store.path, key, signal))
+    child.start()
+    try:
+        assert await asyncio.to_thread(signal.get, True, 15)
+        child.kill()
+        await asyncio.to_thread(child.join, 5)
+        reopened = Coordinator(store.path)
+        assert reopened.snapshot()[key].value == {"count": 10}
+        assert not any(e["kind"] == "uncommitted_event" for e in reopened.events())
+    finally:
+        if child.is_alive():
+            child.kill()
+        child.join(5)
+
+
+def test_mode_and_task_budget_are_persisted(store):
+    spec = setup_run(store)
+    generation = store.claim_run("run", "scheduler")
+    with pytest.raises(CoordinationError) as exc:
+        store.enqueue("run", "crew")
+    assert exc.value.code == "runtime_mismatch"
+    for _ in range(spec.tasks[0].max_attempts):
+        store.begin_attempt("run", spec.tasks[0].id, "worker", generation)
+    with pytest.raises(CoordinationError) as exc:
+        store.begin_attempt("run", spec.tasks[0].id, "worker", generation)
+    assert exc.value.code == "attempts_exhausted"
+
+
+def test_channel_versions_are_immutable_and_schema_checked(store):
+    store.register_channel("channel", "message", 1, {"type": "object"})
+    with pytest.raises(CoordinationError) as exc:
+        store.register_channel("channel", "message", 1, {"type": "object", "required": ["x"]})
+    assert exc.value.code == "channel_immutable"
+    with pytest.raises(CoordinationError):
+        store.register_channel("remote", "message", 1, {"$ref": "https://example.com/schema"})
+    with pytest.raises(CoordinationError):
+        store.register_channel("bad", "message", 1, {"type": "not-a-type"})

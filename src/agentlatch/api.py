@@ -70,13 +70,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app):
-        scheduler.start()
+        if os.getenv("AGENTLATCH_SCHEDULER_ENABLED", "true").lower() == "true":
+            scheduler.start()
         try:
             yield
         finally:
             await scheduler.close()
 
-    app = FastAPI(title="AgentLatch", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="AgentLatch", version="0.2.0", lifespan=lifespan)
     app.state.coordinator = coordinator
     app.state.jobs = jobs
     app.state.scheduler = scheduler
@@ -95,7 +96,35 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "version": "0.1.0"}
+        return {"status": "ok", "version": "0.2.0"}
+
+    @app.get("/ready")
+    def ready():
+        try:
+            with coordinator.connection() as db:
+                db.execute("SELECT count(*) FROM schema_migrations").fetchone()
+            return {"status": "ready"}
+        except Exception:
+            return JSONResponse(status_code=503, content={"status": "unavailable"})
+
+    @app.get("/api/metrics", dependencies=auth)
+    def metrics():
+        with coordinator.connection() as db:
+            runs = {
+                r[0]: r[1]
+                for r in db.execute("SELECT status,count(*) FROM workflows GROUP BY status")
+            }
+            deliveries = {
+                r[0]: r[1]
+                for r in db.execute("SELECT status,count(*) FROM deliveries GROUP BY status")
+            }
+        return {
+            "workflows": runs,
+            "deliveries": deliveries,
+            "scheduler_errors": scheduler.errors,
+            "active_local_jobs": len(jobs),
+            "max_local_jobs": scheduler.max_runs,
+        }
 
     @app.get("/api/executions", dependencies=auth)
     def executions():

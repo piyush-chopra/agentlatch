@@ -6,6 +6,7 @@ import uuid
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .errors import CoordinationError
 from .models import DeliveryAck
 
 
@@ -18,6 +19,7 @@ class Dispatcher:
     def __init__(self, coordinator, handlers):
         self.coordinator = coordinator
         self.handlers = handlers
+        self.errors = 0
         self.owner = "dispatcher-" + uuid.uuid4().hex
 
     async def once(self):
@@ -35,13 +37,22 @@ class Dispatcher:
                 # Visibility timeout makes interrupted delivery recoverable.
                 raise
             except Exception:
-                self.coordinator.reject_delivery(ack, retry_after=min(60, 2 ** item["attempts"]))
+                try:
+                    self.coordinator.reject_delivery(
+                        ack, retry_after=min(60, 2 ** item["attempts"])
+                    )
+                except CoordinationError as exc:
+                    if exc.code != "delivery_fenced":
+                        raise
             count += 1
         return count
 
     async def run(self):
         while True:
-            await self.once()
+            try:
+                await self.once()
+            except Exception:
+                self.errors += 1
             await asyncio.sleep(0.5)
 
 

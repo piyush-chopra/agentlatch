@@ -339,7 +339,21 @@ class Coordinator(DurableRuns, Messaging):
                     (request.workflow_id, request.operation_id),
                 ).fetchone()
                 if existing:
-                    if existing["fingerprint"] != fingerprint:
+                    legacy = digest(
+                        {
+                            "reads": {k: v.model_dump() for k, v in request.reads.items()},
+                            "plan": {
+                                "writes": [w.model_dump() for w in request.plan.writes],
+                                "rationale": request.plan.rationale,
+                            },
+                        }
+                    )
+                    matches_legacy = (
+                        not request.plan.envelopes
+                        and not request.acknowledgements
+                        and existing["fingerprint"] == legacy
+                    )
+                    if existing["fingerprint"] != fingerprint and not matches_legacy:
                         raise CoordinationError(
                             "idempotency_mismatch",
                             "Operation ID was already committed with different content",

@@ -1,0 +1,27 @@
+# Optional shared-storage topology; credentials supplied by the operator.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: agentlatch
+      POSTGRES_USER: agentlatch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-state:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U agentlatch]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  agentlatch:
+    build: .
+    ports: ['127.0.0.1:8000:8000']
+    environment:
+      AGENTLATCH_DB: postgresql://agentlatch:${POSTGRES_PASSWORD}@postgres:5432/agentlatch
+      AGENTLATCH_API_TOKEN: ${AGENTLATCH_API_TOKEN:?Set AGENTLATCH_API_TOKEN}
+      AGENTLATCH_MAX_RUNS: '4'
+    depends_on:
+      postgres:
+        condition: service_healthy
+volumes:
+  postgres-state:
