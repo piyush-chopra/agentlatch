@@ -430,3 +430,42 @@ def test_channel_versions_are_immutable_and_schema_checked(store):
         store.register_channel("remote", "message", 1, {"$ref": "https://example.com/schema"})
     with pytest.raises(CoordinationError):
         store.register_channel("bad", "message", 1, {"type": "not-a-type"})
+
+
+async def test_http_effect_adapter_sends_stable_id_without_following_redirect(store):
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.error import HTTPError
+
+    from agentlatch.dispatcher import http_handlers
+
+    received = []
+
+    class Receiver(BaseHTTPRequestHandler):
+        def do_POST(self):
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            received.append((self.path, self.headers["Idempotency-Key"], payload))
+            self.send_response(302 if self.path == "/redirect" else 204)
+            if self.path == "/redirect":
+                self.send_header("Location", "/unexpected")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Receiver)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    item = {"id": "stable-id", "workflow_id": "run", "schema_version": 1, "payload": {"count": 11}}
+    try:
+        await http_handlers({"sink": base + "/events"})["sink"](item)
+        with pytest.raises(HTTPError):
+            await http_handlers({"sink": base + "/redirect"})["sink"](item)
+        assert [r[0] for r in received] == ["/events", "/redirect"]
+        assert all(r[1] == "stable-id" and r[2]["payload"] == {"count": 11} for r in received)
+    finally:
+        await asyncio.to_thread(server.shutdown)
+        server.server_close()
+        thread.join(2)
