@@ -26,7 +26,7 @@ A downloaded local `gemma4:12b` model was discovered but a successful fully on-d
 
 ## Reliability release verification (2026-09-21)
 
-- SQLite and a real isolated local PostgreSQL instance: 66 tests passed with CrewAI installed. Tests include competing schedulers, claim expiry/fencing, restart recovery, kill-before-commit rollback, kill-after-commit receipt recovery, immutable channels, atomic message handoff, retry/dead-letter handling, lost receiver response with stable idempotency ID, and numeric/schema policy rejection.
+- SQLite and a real isolated local PostgreSQL instance: 67 tests passed with CrewAI installed. Tests include competing schedulers, claim expiry/fencing, restart recovery, kill-before-commit rollback, kill-after-commit receipt recovery, immutable channels, atomic message handoff, retry/dead-letter handling, lost receiver response with stable idempotency ID, and numeric/schema policy rejection.
 - Live `gemma4:31b-cloud` CrewAI schema race on the new durable engine: `run-d5fc3d478ede` completed, ending at `available: 11`, data v3/schema v2. This is cloud inference through local Ollama.
 - Live CrewAI message handoff: `run-c7c887e7fe32` completed. Producer and reviewer exchanged one durable message; its ACK committed with the reviewer update. One effect remained pending with zero delivery attempts; no external dispatcher was started.
 - The HTTP adapter was tested against a local receiver: stable idempotency header and envelope body verified, redirects rejected.
@@ -37,3 +37,5 @@ A downloaded local `gemma4:12b` model was discovered but a successful fully on-d
 The original screenshots and initial 29-test record are historical checkpoints. The reliability tests, benchmark artifacts, and screenshot 13 describe the newer implementation. Provider and framework deprecation warnings remain nonfatal.
 
 CI exposed a slow-start deadline race on Python 3.12: expiry before the initial claim could escape as an exception. The engine now returns the persisted terminal failure without invoking a planner. A deterministic regression test forces this boundary without depending on machine speed.
+
+Final verification: the full suite passed again after the deadline fix (67 tests). [GitHub CI run 35566337651](https://github.com/piyush-chopra/agentlatch/actions/runs/35566337651) passed Python 3.12/3.13, PostgreSQL reliability, CrewAI adapter, and React build jobs for code commit `6121c7e`. The local app was backed up and upgraded to 0.2.0 with its existing workflow history preserved.
