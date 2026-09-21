@@ -1,12 +1,21 @@
 # API reference
 
-Base URL: `http://127.0.0.1:8000`. Interactive contract: `/docs`; machine-readable schema: `/openapi.json`. Strict Pydantic models reject unknown fields. API paths below require `Authorization: Bearer <AGENTLATCH_API_TOKEN>` when that server variable is set. `/health` and UI assets are public.
+Base URL: `http://127.0.0.1:8000`. Interactive contract: `/docs`; machine-readable schema: `/openapi.json`. Strict Pydantic models reject unknown fields. API paths below require `Authorization: Bearer <AGENTLATCH_API_TOKEN>` when that server variable is set. `/health`, `/ready`, and UI assets are public.
 
 ## Routes
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | Process health and version |
+| GET | `/ready` | Database readiness, 503 when unavailable |
+| GET | `/api/executions` | Recent scheduler claims, backend type, local error count |
+| GET | `/api/metrics` | Workflow/delivery totals, local concurrency and errors |
+| GET | `/api/deliveries?limit=100` | Latest mailbox/outbox entries, maximum 1,000 |
+| POST | `/api/channels` | Register immutable destination/kind/version schema |
+| POST | `/api/deliveries/claim` | Claim next available envelope with a visibility timeout |
+| POST | `/api/deliveries/ack` | Fenced, idempotent delivery acknowledgement |
+| POST | `/api/deliveries/retry` | Release failed delivery; dead-letter exhausted attempts |
+| POST | `/api/demos/handoff` | Scripted durable message and outbox example |
 | GET | `/api/runtime` | Non-secret model configuration, team roles, local/cloud inference location, and readiness |
 | GET | `/api/state` | Resources, latest 100 workflows, active leases, event counters |
 | GET | `/api/events?after=0&limit=200&workflow_id=…` | Ascending event cursor; max limit 1,000 |
@@ -18,7 +27,7 @@ Base URL: `http://127.0.0.1:8000`. Interactive contract: `/docs`; machine-readab
 | DELETE | `/api/leases/{token}?owner=…` | Release only matching owner/token rows |
 | POST | `/api/commits` | Atomic validated state transition |
 | POST | `/api/runs` | Schedule a high-level workflow, 202 |
-| GET | `/api/runs/{id}` | Persisted status, limits, and specification |
+| GET | `/api/runs/{id}` | Persisted status, limits, specification, and task outcomes |
 | POST | `/api/runs/{id}/cancel` | Close run; cancel local active worker |
 | POST | `/api/demos` | Start a fresh namespaced race or schema example, 202 |
 
@@ -79,7 +88,7 @@ A successful response contains `operation_id` and updated `resources` indexed by
 7. Release in `finally`. On conflict, use fresh context and a newly charged attempt.
 8. On uncertain network delivery, retry the exact same commit payload to retrieve its receipt.
 
-See [the runnable httpx example](../examples/external_worker.py). The low-level API trusts clients to declare complete read dependencies. A shared bearer token does not enforce per-agent write permissions. The built-in engine additionally enforces workflow task scope.
+See [the runnable httpx example](../examples/external_worker.py). The low-level API trusts clients to declare complete read dependencies. A shared bearer token does not enforce per-agent write permissions. Persisted task scopes are enforced by the coordinator when the workflow contains a task specification. Empty low-level specifications retain administrative trust. Managed runs also require an `execution_token` from the owning scheduler; ordinary external-worker workflows do not enroll in the scheduler.
 
 ## High-level runs
 
@@ -111,3 +120,27 @@ Domain errors return `{"code":"…","message":"…"}`. Invalid request shapes us
 | unauthorized | 401 | Supply configured bearer token |
 
 Rejected commit events are persisted after transaction rollback. Errors earlier in planning or lease acquisition are logged by the built-in engine as task failures/retries, not as rejected commits.
+
+## Durable communication contracts
+
+Register a channel:
+
+```json
+{"destination":"review","kind":"message","schema_version":1,"json_schema":{"type":"object","required":["request"]}}
+```
+
+Declare `destinations: ["review"]` in the publishing task and include `plan.envelopes`:
+
+```json
+{"id":"review-request","kind":"message","destination":"review","schema_version":1,"payload":{"request":"Review the latest snapshot"}}
+```
+
+Claim a delivery:
+
+```json
+{"kind":"message","destination":"review","owner":"review-worker","ttl_seconds":30,"workflow_id":"run-001"}
+```
+
+The claim returns null when nothing is available, otherwise the envelope with stable `id`, `owner`, `token`, source read `context`, and expiry. ACK/retry takes `{"id":"RETURNED_ID","owner":"review-worker","token":RETURNED_TOKEN}`. For atomic consumption, put the same object in a commit's `acknowledgements` array; only messages from that workflow can be acknowledged with its commit. Built-in tasks use `inbox` to claim one message and include its ACK automatically.
+
+Successful commits also return `envelope_ids`. `execution_fenced`, `delivery_fenced`, `runtime_mismatch`, and `channel_immutable` return 409. Unknown channel, duplicate envelope, or undeclared destination return 422. Channel version changes require registration of a new schema version. Delivery attempts are at least once, not exactly once; see [reliability](reliability.md).

@@ -5,8 +5,13 @@
 ```text
 src/agentlatch/
   models.py          Strict Pydantic transport and workflow models
-  coordinator.py     SQLite transactions, leases, versions, receipts, audit log
-  policies.py        Deterministic workflow-scoped conservation invariants
+  coordinator.py     Validated storage transactions, leases, versions, receipts, audit log
+  storage.py         SQLite/PostgreSQL connections and serialized transactions
+  durable.py         Scheduler claims, heartbeat checks, persisted outcomes
+  scheduler.py       Replica-safe polling and bounded active run count
+  messaging.py       Versioned channels, mailbox/outbox, delivery fencing
+  dispatcher.py      Operator-configured HTTP effect delivery
+  policies.py        Conservation, numeric bounds, approved schema hashes
   engine.py          DAG scheduling and bounded attempt/retry execution
   planners.py        Offline simulator and cancellable subprocess adapter
   crew_worker.py     CrewAI Agent / Task / Crew construction and LLM configuration
@@ -54,16 +59,16 @@ Relationships are enforced by coordinator code; the MVP DDL does not declare for
 
 ## Commit algorithm
 
-Inside one `BEGIN IMMEDIATE` transaction:
+Inside one SQLite `BEGIN IMMEDIATE` or PostgreSQL advisory-locked transaction:
 
 1. Hash canonical read stamps and plan. If a receipt exists, return it when the hash matches; otherwise reject ID reuse.
-2. Check workflow existence, running status, and absolute deadline.
+2. Check workflow existence, running status, absolute deadline, and scheduler generation for managed runs.
 3. Check that the supplied attempt is pending and matches workflow, operation, and owner.
-4. Require all write keys to appear in the read set.
+4. Require writes in the read set and enforce persisted task read/write scope.
 5. For every read key, check lease owner, token, expiry, and both resource versions.
 6. Validate all proposed values against current or proposed JSON Schema before changing anything.
-7. Enforce configured conservation invariants over current and fully proposed state. Hash input state and proposed output independently of version counters. Reject excessive repeats.
-8. Update resources and version counters. Insert receipt and transition count, mark attempt committed, append event.
+7. Enforce configured conservation, numeric, and schema-allowlist invariants over current and fully proposed state. Hash input state and proposed output independently of version counters. Reject excessive repeats.
+8. Update resources and version counters. Stage validated envelopes and consumed-message ACKs; insert receipt and transition count, mark attempt committed, append events.
 9. Commit the transaction. On error, roll back; record a rejection in a separate transaction.
 
 A crash after commit but before delivery is safe: the next identical delivery returns the durable receipt. A crash before commit leaves no partial data changes. A crash before the rejection event can omit that event; it cannot partially apply the rejected write.
@@ -75,7 +80,7 @@ stateDiagram-v2
     [*] --> running: create workflow
     running --> completed: all tasks committed
     running --> failed: error / budget / deadline / failed dependency
-    running --> cancelled: cancellation / graceful shutdown
+    running --> cancelled: explicit user cancellation
     completed --> [*]
     failed --> [*]
     cancelled --> [*]
@@ -90,7 +95,7 @@ stateDiagram-v2
     abandoned --> [*]
 ```
 
-A process killed abruptly can leave a workflow `running` and an attempt `pending`. Reusing the same run ID and specification skips committed operations and charges new attempts for unfinished tasks. Remaining task and workflow budgets still apply. Gracefully cancelled/failed runs are terminal; use a new ID to intentionally start a new execution.
+A killed process can leave a workflow running and an attempt pending. The scheduler automatically reclaims expired ownership, abandons interrupted attempts, skips committed operations, and resumes unfinished work. Graceful shutdown releases ownership for recovery. Explicitly cancelled/failed runs are terminal. Remaining task/workflow budgets and original deadlines still apply.
 
 ## Loop and deadlock controls
 
@@ -105,3 +110,15 @@ A process killed abruptly can leave a workflow `running` and an attempt `pending
 ## Frontend behavior
 
 The React console polls state and new events roughly every 1.2 seconds, using an event sequence cursor. It retains the latest 3,000 events in memory and displays up to 80 for a filter. The API retains the full event table until an operator archives it. Model credentials never reach React. UI assets are served by FastAPI after a Vite production build. Server state is authoritative; the UI does not optimistically mutate resource values.
+
+## Reliability tables
+
+| Table | Role |
+| --- | --- |
+| schema_migrations | Additive schema generation; current generation 2 |
+| run_jobs | Workflow ID, immutable planner mode, scheduler owner, generation, expiration |
+| task_outcomes | Terminal per-task result keyed by workflow/task |
+| channels | Immutable JSON Schema keyed by destination/kind/version |
+| deliveries | Stable ID, source workflow/operation/read context, payload, status, owner/token, attempts and availability |
+
+PostgreSQL uses BIGSERIAL for generated IDs and DOUBLE PRECISION for epoch timestamps. Scheduler/delivery checks use the database clock. See [reliability](reliability.md) for transaction boundaries, claim recovery, and outbox delivery semantics.

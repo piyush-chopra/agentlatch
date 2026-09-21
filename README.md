@@ -4,7 +4,7 @@
 
 AgentLatch is an open-source Python execution engine and deterministic state coordinator for asynchronous AI agents, with a React + TypeScript operations console. CrewAI agents can use Ollama, OpenAI, Anthropic, Gemini, or compatible endpoints. An offline simulator reproduces concurrency failures without an API key.
 
-**Status:** working local MVP, not a distributed production database or a proof of semantic correctness. All protected state changes must go through AgentLatch. Coordination uses established transactional techniques; the project applies them at the agent proposal/commit boundary.
+**Status:** working reliability prototype with SQLite/PostgreSQL storage, durable scheduler recovery, and transactional messaging. Production failover and scale validation remain deployment work; this is not a proof of semantic correctness. All protected state changes must go through AgentLatch. Coordination uses established transactional techniques; the project applies them at the agent proposal/commit boundary.
 
 ## Problem statement: autonomous multi-agent synchronization
 
@@ -41,7 +41,7 @@ flowchart LR
     C -->|Invalid or budget exhausted| F[Explicit failure]
 ```
 
-**Scope:** the coordinator is deterministic; model outputs and worker arrival order are not. Protection covers declared dependencies and coordinator-managed writes. It does not establish general semantic correctness, coordinate arbitrary external side effects, or provide distributed high availability. See [architecture and guarantees](docs/architecture.md).
+**Scope:** the coordinator is deterministic; model outputs and worker arrival order are not. Protection covers declared dependencies and coordinator-managed writes. It does not establish general semantic correctness, coordinate arbitrary external side effects, or provide database high availability by itself. See [architecture and guarantees](docs/architecture.md).
 
 ## Working application
 
@@ -117,6 +117,14 @@ The same React app adapts to a compact viewport with a bottom navigation bar, co
 
 Screenshots were captured from the running app on 2026-09-21 using existing local demonstration data, with no mocked API responses. See [capture notes](docs/screenshots/README.md) and the [interactive replay guide](docs/replay.md).
 
+### Durable execution, agent messages, and external effects
+
+The **Reliability** view shows scheduler ownership generations, consumed messages, queued effects, and dead letters. A handoff demo exercises atomic message publication and consumption using simulated agents. PostgreSQL-backed replicas can recover expired scheduler claims; external effects use bounded at-least-once delivery with stable idempotency keys.
+
+![Reliability console showing a completed durable run, consumed message, and queued effect](docs/screenshots/13-reliability.png)
+
+See [reliability architecture and operations](docs/reliability.md), [failure tests](tests/test_reliability.py), and [measured smoke benchmarks](docs/benchmarks/README.md).
+
 ## Quick start
 
 Requirements: Python 3.12 or 3.13, [uv](https://docs.astral.sh/uv/), Node.js 22.12+.
@@ -174,6 +182,7 @@ Start at the [documentation index](docs/README.md).
 
 | Document | Contents |
 | --- | --- |
+| [Durable execution and messaging](docs/reliability.md) | PostgreSQL, scheduler fencing/recovery, mailbox/outbox, policies, deployment boundaries |
 | [Visual replay](docs/replay.md) | Four before/after scenarios, controls, real event evidence, and boundaries |
 | [Architecture / HLD](docs/architecture.md) | Scope, components, trust boundary, deployment topology, guarantees |
 | [Low-level design](docs/low-level-design.md) | Modules, database schema, state machine, transaction algorithm |

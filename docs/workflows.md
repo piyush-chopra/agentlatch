@@ -75,3 +75,7 @@ Run `uv run agentlatch run examples/transfer.json` to move stock atomically betw
 Any task writing a participating resource must read **all** resources in the rule. The coordinator checks the integer total before and after the complete proposed write set inside the same transaction. Missing dependencies, non-integer fields, and changed totals are rejected without partial writes. Unchanged resources contribute their current values. JSON Schema can separately prohibit negative inventory.
 
 The scripted `transfer` action subtracts `amount` from `writes[0]` and adds it to `writes[1]`, using `field`. Real agents follow their natural-language goal. Rules live in the immutable persisted workflow specification; model plans cannot alter them. These are workflow-scoped controls, not a database-wide authorization policy: another trusted workflow without a rule is not bound by it.
+
+## Durable communications and policies
+
+Tasks may declare `destinations`, an optional `inbox`, and `emits` envelope templates. The built-in engine delivers one same-workflow inbox message as untrusted context, refreshes the state snapshot, and acknowledges the message atomically with the successful commit. Plans publish typed `envelopes`; destinations must be pre-registered with an immutable schema. Numeric bounds and approved schema hashes complement conservation invariants. See [reliability](reliability.md) for complete contracts and limits.

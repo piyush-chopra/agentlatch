@@ -1,0 +1,17 @@
+{
+  "captured_at": "2026-09-21T05:47:03.580809+00:00",
+  "backend": "sqlite",
+  "python": "3.12.12",
+  "platform": "Darwin arm64",
+  "workload": "Concurrent workflows incrementing one shared resource; ScriptedPlanner includes 120ms delay",
+  "runs": 8,
+  "agents_per_run": 2,
+  "completed_runs": 8,
+  "expected_value": 16,
+  "actual_value": 16,
+  "elapsed_seconds": 2.755,
+  "commits_per_second": 5.807,
+  "workflow_p50_seconds": 2.09,
+  "workflow_p95_seconds": 2.752,
+  "scope": "Single machine, one client process, small smoke workload; not production capacity or LLM throughput"
+}

@@ -111,3 +111,7 @@ sequenceDiagram
 ```
 
 Already committed operations remain committed. Terminating the local worker cannot guarantee that a remote provider cancels an already submitted generation or stops billing it.
+
+## Durable ownership and message delivery
+
+See the [scheduler takeover sequence and transactional mailbox/outbox flow](reliability.md) for the new recovery path. Graceful server shutdown now releases ownership for another scheduler; only explicit user cancellation makes the workflow cancelled.

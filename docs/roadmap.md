@@ -1,48 +1,30 @@
-# Roadmap and current limits
+# Delivered scope and remaining deployment work
 
-## Delivered local MVP
+## Implemented
 
-- [x] Python coordinator and async execution engine.
-- [x] React + TypeScript console and live event polling.
-- [x] Versioned data/schema snapshots and atomic multi-resource commits.
-- [x] All-resource leases, expiry, monotonic fencing tokens.
-- [x] Durable operation receipts and crash-resume path.
-- [x] DAG, step, attempt, deadline, and repeated-transition limits.
-- [x] CrewAI structured proposal adapter; local/cloud provider configuration.
-- [x] Reproducible offline schema and lost-update demonstrations.
-- [x] API, CLI, tests, architecture/flow/LLD docs, and container/CI definitions.
-- [x] Deterministic workflow conservation invariants with complete dependency checking.
+- Python asynchronous engine, CrewAI specialist/reviewer workers, React console.
+- Versioned snapshots, atomic multi-resource commits, leases, fencing, receipts, bounded retries and loops.
+- Conservation rules, numeric bounds/maximum deltas, approved schema hashes.
+- SQLite and optional PostgreSQL storage with serialized mutation transactions and additive schema initialization.
+- Durable run mode, scheduler claims, heartbeat, generation fencing, automatic recovery, terminal task outcomes.
+- Versioned message contracts, atomic publication/consumption, bounded delivery claims, dead letters.
+- Transactional outbox and explicitly configured HTTP effect dispatcher with stable idempotency keys.
+- Reliability console, API readiness/metrics, scripted message handoff demonstration.
+- Competing scheduler tests, real process-kill tests before/after commit, stale-owner tests, delivery retry tests.
+- Local contention smoke measurements and PostgreSQL CI configuration.
 
-## Next: stronger domain correctness
+## Operational acceptance still required
 
-The protocol prevents stale writes and now enforces configured integer conservation rules. Extend deterministic domain policies (allowed migrations, richer cross-resource invariants, allowed numeric deltas), integration tests for write skew, and adversarial proposal evaluation. Policies must run within the same commit transaction against the fully proposed state. Model-generated policy exceptions must not override them.
+The code implements the next reliability phase. It is not a production-readiness certification. Before enterprise deployment, validate PostgreSQL failover, network partitions, backup/restore, sustained load and tail latency under the real workload, downstream effect deduplication, and operational ownership.
 
-## Next: durable distributed execution
+## Further product scope
 
-Add PostgreSQL storage with migrations, explicit isolation and retry strategy, durable task claiming, scheduler fencing, per-run execution ownership, heartbeats, and safe multi-replica recovery. Validate through process-kill fault injection and competing scheduler tests. This must precede multi-host deployment.
+- Per-agent identity/capabilities, tenant isolation, request/model global quotas, event archival and tamper-evident audit controls.
+- Broader domain validators, contractual migration compatibility, semantic adversarial evaluations.
+- Deployment-specific compensations, operator-driven dead-letter redrive, cross-database orchestration.
+- Higher-throughput scheduler/locking strategies and true event-sourced replay.
+- Model configuration pinned per workflow/agent rather than global server configuration.
 
-## Next: external effects
+## Current limits
 
-Introduce an atomic transactional outbox. Require effect IDs and downstream idempotency; acknowledge delivery at least once. Design compensations for nontransactional actions. Never market end-to-end exactly-once behavior for arbitrary external APIs.
-
-## Next: platform hardening
-
-Per-agent identity and capabilities; tenant boundaries; request/model concurrency limits; validated configuration; bounded payloads; event archival; migration tooling; metrics/traces; load tests; backup/restore drills; provider evaluation suite; accessible frontend interaction tests.
-
-## Known limitations
-
-- One host and one API scheduler process; no distributed consensus/high availability.
-- Task scheduling uses waves and is not throughput-optimized.
-- Built-in provider selection is global, not per-agent.
-- Schemas protect structure, not semantic truth, contractual compatibility, or business policy.
-- Only declared dependencies are checked. External workers can omit reads if trusted protocol rules are violated.
-- Entire workflows can partially succeed; there are no compensations or global rollback.
-- Abrupt crashes can leave runs marked running until explicitly resumed or cancelled.
-- No automatic lease renewal; planning occurs before lease acquisition.
-- No true event-sourced replay or cross-database transaction.
-- No live LLM success claim without an actual configured provider run.
-- UI displays recent events; full history remains queryable through the cursor API.
-
-## Acceptance criteria for production readiness
-
-Demonstrate invariant preservation under competing processes and schedulers, abrupt kills at transaction boundaries, network partitions, duplicate requests, schema migration conflicts, provider timeouts, and database failover. Publish measured throughput, tail latency, recovery time, resource consumption, and documented operational ownership before calling the system production-ready.
+PostgreSQL coordinator mutations use one shared advisory transaction lock. SQLite is local storage. Scheduling uses task waves and one owning scheduler per run. Delivery is at least once and unordered; receivers must deduplicate. Whole workflows may partially succeed and cancellation does not undo committed external effects. Protection applies only to declared dependencies and coordinator-managed writes. Schemas and domain rules enforce configured properties, not arbitrary semantic truth. See [reliability design](reliability.md).

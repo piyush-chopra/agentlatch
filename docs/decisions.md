@@ -10,15 +10,15 @@
 
 ## ADR-003 — SQLite first
 
-**Accepted for MVP.** WAL plus short immediate transactions provides a reproducible, low-setup, cross-process local coordinator. PostgreSQL with explicit transaction isolation, migrations, and a durable scheduler is the next production storage milestone. Adding Redis locks alone would not replace database version checks or atomic receipts.
+**Accepted for MVP.** WAL plus short immediate transactions provides a reproducible, low-setup, cross-process local coordinator. The v0.2 extension below adds PostgreSQL, additive schema initialization, and a durable scheduler. Production failover validation is still separate. Adding Redis locks alone would not replace database version checks or atomic receipts.
 
 ## ADR-004 — Optimistic planning plus fenced commit leases
 
-**Accepted.** Do not hold locks across slow model calls. Read first; plan; atomically lease the full dependency set; validate versions; commit. Leases expose explicit ownership/recovery semantics, while optimistic version checks remain necessary. In the single SQLite backend, transactions alone already serialize commits; leases provide an explicit protocol boundary for workers.
+**Accepted.** Do not hold locks across slow model calls. Read first; plan; atomically lease the full dependency set; validate versions; commit. Leases expose explicit ownership/recovery semantics, while optimistic version checks remain necessary. In the original SQLite backend, transactions alone already serialize commits; leases provide an explicit protocol boundary for workers.
 
 ## ADR-005 — No exactly-once claims for external side effects
 
-**Accepted.** Resource changes and receipts are atomic inside one coordinator database. External payments, emails, migrations, and HTTP actions are not included. Future integrations need an outbox, downstream idempotency, fencing support, and compensation policies. Do not add side-effecting CrewAI tools without that design.
+**Accepted.** Resource changes and receipts are atomic inside one coordinator database. External payments, emails, migrations, and HTTP actions are not included. The v0.2 outbox supplies delivery IDs and fencing; downstream idempotency and application-specific compensation remain integration responsibilities. Do not add side-effecting CrewAI tools without that design.
 
 ## ADR-006 — Durable bounded autonomy
 
@@ -31,3 +31,11 @@
 ## ADR-008 — Honest commit history
 
 **Accepted.** Canonical source is `piyush-chopra/agentlatch`. Use small, meaningful commits as implementation progresses. Commit dates reflect actual work; future-dated or fabricated backdated history is not part of the workflow.
+
+## ADR: shared PostgreSQL and durable ownership
+
+Accepted for v0.2. SQLite remains the zero-service local option. PostgreSQL coordinator mutations acquire one transaction advisory lock to preserve the original serialized commit model across replicas. This trades write throughput for a small, testable safety boundary. Run ownership is a separate expiring, generation-fenced claim; models never hold the storage transaction.
+
+## ADR: atomic outbox, at-least-once effects
+
+Accepted for v0.2. Publish envelopes and consume messages in the state commit transaction. Use stable delivery IDs and fenced visibility leases. External receivers own durable deduplication because a remote side effect cannot share the local database transaction. URLs are operator-configured destination mappings, never model-chosen network locations.
