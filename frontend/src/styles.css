@@ -308,3 +308,5 @@ tr:last-child td { border-bottom: 0; }
   :root { --secondary: var(--ink); --line: var(--secondary); }
   .panel, .stat, .resource-card, .playground, .button { outline: 1px solid currentColor; }
 }
+.runtime-note { display: flex; align-items: center; gap: 8px; font-size: .6875rem; line-height: 1.6; margin-top: 17px; color: var(--mint-ink); }
+.runtime-warning { color: var(--peach-ink); }

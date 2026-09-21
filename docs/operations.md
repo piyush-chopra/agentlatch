@@ -30,7 +30,8 @@ The default container includes the offline runtime and serves the built React co
 | AGENTLATCH_DB | .agentlatch/state.db | SQLite path |
 | AGENTLATCH_API_TOKEN | empty | Optional workspace-wide API bearer token |
 | AGENTLATCH_ENABLE_CREW | false | Allow model-backed runs through HTTP |
-| AGENTLATCH_MODEL | ollama/llama3.2 | CrewAI model identifier |
+| AGENTLATCH_MODEL | ollama_chat/gemma4:31b-cloud | CrewAI model identifier |
+| AGENTLATCH_LOCAL_ONLY | false | Reject cloud tags and non-loopback Ollama endpoints when true |
 | AGENTLATCH_BASE_URL | provider default | Model endpoint override |
 | AGENTLATCH_API_KEY_ENV | prefix-based mapping | Name of key environment variable |
 

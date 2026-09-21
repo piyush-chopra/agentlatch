@@ -7,6 +7,7 @@ Base URL: `http://127.0.0.1:8000`. Interactive contract: `/docs`; machine-readab
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | Process health and version |
+| GET | `/api/runtime` | Non-secret model configuration, team roles, local/cloud inference location, and readiness |
 | GET | `/api/state` | Resources, latest 100 workflows, active leases, event counters |
 | GET | `/api/events?after=0&limit=200&workflow_id=…` | Ascending event cursor; max limit 1,000 |
 | POST | `/api/resources` | Create a resource, 201; existing key returns 409 |
@@ -105,6 +106,7 @@ Domain errors return `{"code":"…","message":"…"}`. Invalid request shapes us
 | resource_missing / workflow_missing | 404 | Initialize missing identifiers |
 | invariant_violation / incomplete_policy_reads | 422 | Correct the transfer and include every invariant dependency |
 | schema_violation / invalid_schema / scope_violation | 422 | Correct plan or schema |
+| runtime_unavailable | 422 | Start Ollama, install/select the model, or correct the local-only configuration |
 | crew_disabled | 422 | Configure server opt-in |
 | unauthorized | 401 | Supply configured bearer token |
 

@@ -31,7 +31,7 @@ flowchart LR
 | React console | Start runs, inspect shared state and events, cancel execution | Model keys, direct database access |
 | FastAPI | Validate transport models, authenticate optional bearer token, expose protocol | Semantic reasoning |
 | Engine | Validate DAG, schedule ready tasks, reserve attempts, replan conflicts | Deciding if arbitrary model reasoning is true |
-| CrewAI adapter | Construct specialist agents and structured plans from fresh snapshots | Tools that mutate shared state or perform external actions |
+| CrewAI adapter | Construct specialist/reviewer teams and structured plans from fresh snapshots | Tools that mutate shared state or perform external actions |
 | Coordinator | Compare versions, validate schemas, fence stale writers, commit atomically | Model calls, remote network requests |
 | SQLite | Durable transactions and serialization on one host | Multi-host replication or consensus |
 

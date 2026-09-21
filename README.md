@@ -16,7 +16,7 @@ cd frontend
 npm ci
 npm run build
 cd ..
-uv run agentlatch serve
+uv run --extra crew agentlatch serve
 ```
 
 Open **http://127.0.0.1:8000** for the console and **http://127.0.0.1:8000/docs** for interactive API documentation. Click **Run scenario** to reproduce a schema migration racing with an inventory update. The event timeline shows the stale commit being rejected and the agent replanning against the new schema.
@@ -40,11 +40,11 @@ cd frontend && npm run build
 uv sync --extra crew --group dev
 cp .env.example .env
 # Install/start Ollama separately, then:
-ollama pull llama3.2
+ollama pull gemma4:31b-cloud
 uv run --extra crew agentlatch demo --mode crew
 ```
 
-Set `AGENTLATCH_MODEL` and the relevant provider key in `.env`. Set `AGENTLATCH_ENABLE_CREW=true` to enable CrewAI runs from the console. The CLI's explicit `--mode crew` also opts into model calls. See [provider setup](docs/providers.md) for Ollama, OpenAI, Anthropic, Gemini, and compatible local servers. No credentials are stored in the browser or database.
+The supplied `.env.example` selects `ollama_chat/gemma4:31b-cloud` through localhost Ollama. This tag uses **cloud inference**, not on-device generation; sign in to Ollama if required. For on-device inference, select a downloaded model and set `AGENTLATCH_LOCAL_ONLY=true`. Set `AGENTLATCH_MODEL` and any relevant provider key in `.env`. Set `AGENTLATCH_ENABLE_CREW=true` to enable CrewAI runs from the console. The CLI's explicit `--mode crew` also opts into model calls. See [provider setup](docs/providers.md) for Ollama, OpenAI, Anthropic, Gemini, and compatible local servers. No credentials are stored in the browser or database.
 
 ## What is implemented
 
@@ -77,7 +77,7 @@ Start at the [documentation index](docs/README.md).
 
 ```sh
 # Terminal 1
-uv run agentlatch serve
+uv run --extra crew agentlatch serve
 # Terminal 2
 cd frontend && npm ci && npm run dev
 ```
