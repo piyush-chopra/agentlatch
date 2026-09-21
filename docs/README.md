@@ -33,3 +33,5 @@ AgentLatch coordinates shared JSON state used by asynchronous agents. Python own
 The implementation uses CrewAI's documented [LLM configuration](https://docs.crewai.com/en/learn/llm-connections) and [structured task output](https://docs.crewai.com/en/concepts/tasks). Frontend tooling follows [React](https://react.dev/learn/creating-a-react-app) and [Vite](https://vite.dev/guide/). These references describe upstream APIs; this repository's lockfiles determine the exact installed versions.
 
 Implementation checks and untested boundaries are recorded in [verification](verification.md).
+
+The [interface design guide](design.md) covers the iPad-inspired React redesign, typography, color tokens, accessibility decisions, and HIG references.
