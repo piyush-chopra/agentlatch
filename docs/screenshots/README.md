@@ -12,3 +12,5 @@ The capture used an isolated headless Chrome session through Playwright, explici
 - `12`: responsive workspace at a tablet viewport.
 
 The selected model `gemma4:31b-cloud` uses cloud inference through the local Ollama server. The images do not establish production scalability, distributed availability, or universal semantic correctness. Follow the README quick start to reproduce the UI; run identifiers and totals naturally differ across installations.
+
+`13-reliability.png` was added after the reliability implementation. It shows an actual completed scripted handoff in the upgraded local workspace, its consumed message, and pending effect. No external dispatcher ran during capture. Desktop, 820px tablet, and 390px phone navigation were checked; no browser JavaScript errors or horizontal viewport overflow were observed.

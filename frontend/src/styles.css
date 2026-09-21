@@ -390,3 +390,18 @@ tr:last-child td { border-bottom: 0; }
   .evidence-footer { flex-direction: column; align-items: flex-start; }
   .replay-scrubber input { min-height: 44px; }
 }
+
+.reliability-intro { padding: 2rem; display:grid; grid-template-columns: 1.5fr 1fr; gap:2rem; }
+.reliability-intro h2 { font: 2rem var(--serif); margin:.6rem 0; }
+.reliability-intro p { line-height:1.65; }
+.reliability-intro small { display:block; margin-top:1rem; color:var(--secondary); }
+.reliability-facts { display:grid; gap:.65rem; }
+.reliability-facts p { margin:0; padding:1rem; border-radius:18px; background:var(--lavender); display:flex; gap:.8rem; align-items:center; flex-wrap:wrap; }
+.delivery-grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,330px),1fr)); gap:1rem; margin-top:1.5rem; }
+.delivery-card { padding:1.5rem; min-width:0; }
+.delivery-card header { display:flex; justify-content:space-between; }
+.delivery-card h3 { font-size:1.15rem; overflow-wrap:anywhere; }
+.delivery-card .mono { overflow-wrap:anywhere; font-size:.75rem; }
+.delivery-card pre { overflow:auto; max-height:320px; }
+.delivery-card summary { cursor:pointer; padding:.8rem 0; min-height:44px; }
+@media(max-width:700px) { .reliability-intro {grid-template-columns:1fr;padding:1.25rem;} .compact-nav button {font-size:.65rem;} }
