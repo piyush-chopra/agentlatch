@@ -1,0 +1,15 @@
+{
+  "name": "Concurrent inventory receipts and report",
+  "resources": [
+    {"key": "warehouse/inventory", "value": {"count": 10}, "json_schema": {"type": "object", "properties": {"count": {"type": "integer", "minimum": 0}}, "required": ["count"], "additionalProperties": false}},
+    {"key": "warehouse/report", "value": {}, "json_schema": {"type": "object"}}
+  ],
+  "tasks": [
+    {"id": "receiving-a", "role": "Receiving specialist", "goal": "Add two items to count.", "reads": ["warehouse/inventory"], "writes": ["warehouse/inventory"], "action": "increment", "amount": 2},
+    {"id": "receiving-b", "role": "Receiving specialist", "goal": "Add three items to count.", "reads": ["warehouse/inventory"], "writes": ["warehouse/inventory"], "action": "increment", "amount": 3},
+    {"id": "reporter", "role": "Inventory reporter", "goal": "Set report to an object with observed equal to the entire current inventory value.", "reads": ["warehouse/inventory", "warehouse/report"], "writes": ["warehouse/report"], "depends_on": ["receiving-a", "receiving-b"], "action": "copy"}
+  ],
+  "max_steps": 20,
+  "timeout_seconds": 300,
+  "repeat_limit": 3
+}
