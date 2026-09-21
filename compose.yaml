@@ -1,0 +1,17 @@
+services:
+  agentlatch:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - state:/data
+    environment:
+      AGENTLATCH_API_TOKEN: ${AGENTLATCH_API_TOKEN:-}
+      AGENTLATCH_ENABLE_CREW: ${AGENTLATCH_ENABLE_CREW:-false}
+      AGENTLATCH_MODEL: ${AGENTLATCH_MODEL:-ollama/llama3.2}
+      AGENTLATCH_BASE_URL: ${AGENTLATCH_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+volumes:
+  state:
