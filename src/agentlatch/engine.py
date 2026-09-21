@@ -43,7 +43,15 @@ class Engine:
             return {"id": run_id, "status": workflow["status"], "tasks": {}}
         c.enqueue(run_id, mode)
         owner = f"scheduler-{uuid.uuid4().hex}"
-        generation = c.claim_run(run_id, owner, claim_ttl)
+        try:
+            generation = c.claim_run(run_id, owner, claim_ttl)
+        except CoordinationError as exc:
+            if exc.code == "deadline_exceeded":
+                c.expire_runs()
+                return {"id": run_id, "status": c.get_workflow(run_id)["status"], "tasks": {}}
+            if exc.code == "workflow_closed":
+                return {"id": run_id, "status": c.get_workflow(run_id)["status"], "tasks": {}}
+            raise
         self.execution_tokens[run_id] = generation
         parent = asyncio.current_task()
 

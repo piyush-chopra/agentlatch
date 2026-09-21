@@ -35,3 +35,5 @@ A downloaded local `gemma4:12b` model was discovered but a successful fully on-d
 - PostgreSQL reliability CI job and optional Compose topology added. Local native PostgreSQL was executed; Docker container execution, remote network partitions, replicated-database failover, and production-scale load are not claimed as tested.
 
 The original screenshots and initial 29-test record are historical checkpoints. The reliability tests, benchmark artifacts, and screenshot 13 describe the newer implementation. Provider and framework deprecation warnings remain nonfatal.
+
+CI exposed a slow-start deadline race on Python 3.12: expiry before the initial claim could escape as an exception. The engine now returns the persisted terminal failure without invoking a planner. A deterministic regression test forces this boundary without depending on machine speed.

@@ -92,3 +92,23 @@ async def test_mismatched_run_does_not_bootstrap_new_resources(tmp_path):
     with pytest.raises(CoordinationError):
         await Engine(c, ScriptedPlanner()).run(changed, "same")
     assert "unwanted" not in c.snapshot()
+
+
+async def test_deadline_before_initial_claim_returns_terminal_failure(tmp_path, monkeypatch):
+    c = Coordinator(tmp_path / "expired-before-claim.db")
+    spec = demo_spec("race")
+    for resource in spec.resources:
+        c.create_resource(resource)
+    claim = c.claim_run
+
+    def expire_before_claim(run_id, owner, ttl):
+        with c.transaction() as db:
+            db.execute("UPDATE workflows SET deadline=0 WHERE id=?", (run_id,))
+        return claim(run_id, owner, ttl)
+
+    monkeypatch.setattr(c, "claim_run", expire_before_claim)
+    result = await Engine(c, ScriptedPlanner()).run(spec)
+    assert result["status"] == "failed"
+    assert c.get_workflow(result["id"])["steps"] == 0
+    assert next(iter(c.snapshot().values())).value == {"count": 10}
+    assert c.state()["totals"]["workflow_failed"] == 1
