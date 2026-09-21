@@ -7,6 +7,7 @@ AgentLatch coordinates shared JSON state used by asynchronous agents. Python own
 ## Reading paths
 
 - **Run it:** [root quick start](../README.md) → [providers](providers.md) → [operations](operations.md).
+- **See the problem:** [interactive replay guide](replay.md).
 - **Understand it:** [architecture / HLD](architecture.md) → [flow diagrams / FLDs](flows.md) → [low-level design / LLD](low-level-design.md).
 - **Integrate it:** [workflow guide](workflows.md) → [API reference](api.md) → [external worker example](../examples/external_worker.py).
 - **Contribute:** [contribution guide](../CONTRIBUTING.md) → [architecture decisions](decisions.md) → [roadmap](roadmap.md).

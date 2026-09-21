@@ -63,6 +63,7 @@ Start at the [documentation index](docs/README.md).
 
 | Document | Contents |
 | --- | --- |
+| [Visual replay](docs/replay.md) | Four before/after scenarios, controls, real event evidence, and boundaries |
 | [Architecture / HLD](docs/architecture.md) | Scope, components, trust boundary, deployment topology, guarantees |
 | [Low-level design](docs/low-level-design.md) | Modules, database schema, state machine, transaction algorithm |
 | [Flow diagrams](docs/flows.md) | Execution flow, race resolution, fencing, cancellation, recovery |
