@@ -40,7 +40,22 @@ class Write(Model):
     json_schema: dict[str, Any] | None = None
 
 
+class Envelope(Model):
+    id: Key
+    kind: Literal["message", "effect"] = "message"
+    destination: Key
+    schema_version: int = Field(default=1, ge=1)
+    payload: dict[str, Any]
+
+
+class DeliveryAck(Model):
+    id: Key
+    owner: Key
+    token: int = Field(ge=1)
+
+
 class Plan(Model):
+    envelopes: list[Envelope] = Field(default_factory=list, max_length=32)
     writes: list[Write] = Field(max_length=64)
     rationale: str = Field(default="", max_length=4000)
 
@@ -65,6 +80,8 @@ class Lease(Model):
 
 
 class Commit(Model):
+    acknowledgements: list[DeliveryAck] = Field(default_factory=list, max_length=32)
+    execution_token: int | None = Field(default=None, ge=1)
     workflow_id: Key
     operation_id: Key
     owner: Key
@@ -87,6 +104,38 @@ class ConservationRule(Model):
         return self
 
 
+class NumericRule(Model):
+    id: Key
+    kind: Literal["numeric_bounds"] = "numeric_bounds"
+    resources: list[Key] = Field(min_length=1, max_length=64)
+    field: str = Field(min_length=1, max_length=160)
+    minimum: int | None = None
+    maximum: int | None = None
+    max_delta: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def bounds(self):
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            raise ValueError("minimum exceeds maximum")
+        return self
+
+
+class SchemaRule(Model):
+    id: Key
+    kind: Literal["schema_allowlist"] = "schema_allowlist"
+    resources: list[Key] = Field(min_length=1, max_length=64)
+    allowed_hashes: list[str] = Field(min_length=1, max_length=32)
+
+
+Invariant = Annotated[ConservationRule | NumericRule | SchemaRule, Field(discriminator="kind")]
+
+
+def parse_rule(rule):
+    from pydantic import TypeAdapter
+
+    return TypeAdapter(Invariant).validate_python({"kind": "conserve_total", **rule})
+
+
 class WorkflowCreate(Model):
     id: Key
     max_steps: int = Field(default=30, ge=1, le=10000)
@@ -100,11 +149,14 @@ class WorkflowCreate(Model):
         if not isinstance(rules, list) or len(rules) > 32:
             raise ValueError("invariants must be a list of at most 32 rules")
         for rule in rules:
-            ConservationRule.model_validate(rule)
+            parse_rule(rule)
         return self
 
 
 class TaskSpec(Model):
+    emits: list[Envelope] = Field(default_factory=list, max_length=32)
+    inbox: Key | None = None
+    destinations: list[Key] = Field(default_factory=list, max_length=32)
     id: Key
     role: str = Field(min_length=1, max_length=500)
     goal: str = Field(min_length=1, max_length=8000)
@@ -119,6 +171,8 @@ class TaskSpec(Model):
 
     @model_validator(mode="after")
     def scope(self):
+        if any(e.destination not in self.destinations for e in self.emits):
+            raise ValueError("Every emitted envelope needs a declared destination")
         if self.action == "transfer" and len(self.writes) != 2:
             raise ValueError("Transfer requires exactly two ordered write targets")
         if not set(self.writes) <= set(self.reads):
@@ -129,7 +183,7 @@ class TaskSpec(Model):
 
 
 class WorkflowSpec(Model):
-    invariants: list[ConservationRule] = Field(default_factory=list, max_length=32)
+    invariants: list[Invariant] = Field(default_factory=list, max_length=32)
     name: str = Field(min_length=1, max_length=200)
     resources: list[ResourceCreate] = Field(default_factory=list)
     tasks: list[TaskSpec] = Field(min_length=1, max_length=100)

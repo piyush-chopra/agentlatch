@@ -56,3 +56,57 @@ def demo_spec(scenario: str = "schema") -> WorkflowSpec:
         tasks=tasks,
         timeout_seconds=300,
     )
+
+
+def handoff_spec():
+    from .models import Envelope, NumericRule
+
+    suffix = uuid.uuid4().hex[:8]
+    key = f"handoff-{suffix}/inventory"
+    review = f"handoff-{suffix}/review"
+    notify = "inventory-notifications"
+    return WorkflowSpec(
+        name="Durable agent handoff",
+        resources=[ResourceCreate(key=key, value={"count": 10})],
+        invariants=[
+            NumericRule(id="bounded-update", resources=[key], field="count", minimum=0, max_delta=1)
+        ],
+        tasks=[
+            TaskSpec(
+                id="producer",
+                role="Inventory specialist",
+                goal="Increase count by one and emit the requested review message.",
+                reads=[key],
+                writes=[key],
+                action="increment",
+                destinations=[review],
+                emits=[
+                    Envelope(
+                        id="review",
+                        destination=review,
+                        payload={"request": "Verify the latest authoritative inventory snapshot"},
+                    )
+                ],
+            ),
+            TaskSpec(
+                id="reviewer",
+                role="State reviewer",
+                goal="Read the review message and current snapshot; leave count unchanged and emit the notification template.",
+                reads=[key],
+                writes=[key],
+                action="noop",
+                depends_on=["producer"],
+                inbox=review,
+                destinations=[notify],
+                emits=[
+                    Envelope(
+                        id="notification",
+                        kind="effect",
+                        destination=notify,
+                        payload={"inventory": key, "reviewed": True},
+                    )
+                ],
+            ),
+        ],
+        max_steps=10,
+    )

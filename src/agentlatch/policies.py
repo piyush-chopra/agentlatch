@@ -36,3 +36,34 @@ def enforce_conservation(
                 f"Invariant {rule.id}: total {rule.field} must remain {sum(before)}, proposed {sum(after)}",
                 422,
             )
+
+
+def enforce_rules(rules, current, proposed):
+    from .coordinator import digest
+
+    enforce_conservation([r for r in rules if r.kind == "conserve_total"], current, proposed)
+    for rule in rules:
+        if rule.kind == "conserve_total" or not set(rule.resources).intersection(proposed):
+            continue
+        if not set(rule.resources) <= current.keys():
+            raise CoordinationError(
+                "incomplete_policy_reads", f"Rule {rule.id} needs all dependencies", 422
+            )
+        for key in rule.resources:
+            old = current[key]
+            new = proposed.get(key, old)
+            if rule.kind == "schema_allowlist":
+                valid = digest(new.json_schema) in rule.allowed_hashes
+            else:
+                before, after = old.value.get(rule.field), new.value.get(rule.field)
+                valid = type(before) is int and type(after) is int
+                if valid:
+                    valid = (
+                        (rule.minimum is None or after >= rule.minimum)
+                        and (rule.maximum is None or after <= rule.maximum)
+                        and (rule.max_delta is None or abs(after - before) <= rule.max_delta)
+                    )
+            if not valid:
+                raise CoordinationError(
+                    "invariant_violation", f"Rule {rule.id} rejected resource {key}", 422
+                )

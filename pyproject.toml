@@ -19,6 +19,7 @@ Repository = "https://github.com/piyush-chopra/agentlatch"
 Issues = "https://github.com/piyush-chopra/agentlatch/issues"
 
 [project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2,<4"]
 crew = ["crewai[litellm,anthropic,google-genai]>=1.0,<2"]
 
 [dependency-groups]

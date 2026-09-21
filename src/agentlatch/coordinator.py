@@ -4,26 +4,26 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
-import time
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator, SchemaError, ValidationError
 from referencing.exceptions import Unresolvable
 
+from .durable import DURABLE_DDL, DurableRuns
 from .errors import CoordinationError
+from .messaging import MESSAGING_DDL, Messaging
 from .models import (
     Commit,
-    ConservationRule,
     Lease,
     LeaseRequest,
     Resource,
     ResourceCreate,
     WorkflowCreate,
+    parse_rule,
 )
-from .policies import enforce_conservation
+from .policies import enforce_rules
+from .storage import Storage
 
 
 def canonical(value: Any) -> str:
@@ -34,7 +34,7 @@ def digest(value: Any) -> str:
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
-def validate_value(value: dict, schema: dict):
+def validate_value(value: dict, schema: dict, check_value=True):
     def check_refs(node):
         if isinstance(node, dict):
             for key, item in node.items():
@@ -54,7 +54,8 @@ def validate_value(value: dict, schema: dict):
         canonical(schema)
         check_refs(schema)
         Draft202012Validator.check_schema(schema)
-        Draft202012Validator(schema).validate(value)
+        if check_value:
+            Draft202012Validator(schema).validate(value)
     except (
         SchemaError,
         ValidationError,
@@ -93,43 +94,27 @@ CREATE INDEX IF NOT EXISTS events_workflow ON events(workflow_id, sequence);
 """
 
 
-class Coordinator:
+class Coordinator(DurableRuns, Messaging):
     def __init__(self, path: str | Path):
         self.path = str(path)
-        if self.path == ":memory:":
-            raise ValueError("Use a file-backed SQLite database; connections must share state")
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        with self.connection() as db:
-            db.execute("PRAGMA journal_mode=WAL")
-            db.executescript(DDL)
+        self.storage = Storage(path)
+        self.storage.initialize(DDL + DURABLE_DDL + MESSAGING_DDL)
 
-    @contextmanager
     def connection(self):
-        db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout=10000")
-        db.execute("PRAGMA synchronous=FULL")
-        try:
-            yield db
-        finally:
-            db.close()
+        return self.storage.connection()
 
-    @contextmanager
     def transaction(self):
-        with self.connection() as db:
-            db.execute("BEGIN IMMEDIATE")
-            try:
-                yield db
-                db.commit()
-            except BaseException:
-                db.rollback()
-                raise
+        return self.storage.transaction()
+
+    @staticmethod
+    def now(db):
+        return Storage.now(db)
 
     @staticmethod
     def event(db, workflow_id, kind, payload):
         db.execute(
             "INSERT INTO events(workflow_id,kind,payload,created_at) VALUES (?,?,?,?)",
-            (workflow_id, kind, canonical(payload), time.time()),
+            (workflow_id, kind, canonical(payload), Storage.now(db)),
         )
 
     def record(self, workflow_id: str | None, kind: str, payload: dict):
@@ -181,17 +166,26 @@ class Coordinator:
         with self.transaction() as db:
             existing = db.execute("SELECT * FROM workflows WHERE id=?", (spec.id,)).fetchone()
             if existing:
+                old_spec = json.loads(existing["specification"])
+                new_spec = spec.specification
+                if "tasks" in old_spec and "tasks" in new_spec:
+                    from .models import WorkflowSpec
+
+                    old_spec = WorkflowSpec.model_validate(old_spec).model_dump()
+                    new_spec = WorkflowSpec.model_validate(new_spec).model_dump()
                 if (
-                    existing["specification"] != canonical(spec.specification)
+                    canonical(old_spec) != canonical(new_spec)
                     or existing["max_steps"] != spec.max_steps
                     or existing["repeat_limit"] != spec.repeat_limit
+                    or abs(existing["deadline"] - existing["created_at"] - spec.timeout_seconds)
+                    > 0.001
                 ):
                     raise CoordinationError(
                         "workflow_mismatch",
                         "A run ID cannot be reused for a different specification",
                     )
                 return dict(existing)
-            now = time.time()
+            now = self.now(db)
             db.execute(
                 "INSERT INTO workflows VALUES (?, 'running', 0, ?, ?, ?, ?, ?)",
                 (
@@ -220,13 +214,27 @@ class Coordinator:
             raise CoordinationError("workflow_missing", "Unknown workflow", 404)
         if row["status"] != "running":
             raise CoordinationError("workflow_closed", f"Workflow is {row['status']}")
-        if row["deadline"] <= time.time():
+        if row["deadline"] <= Storage.now(db):
             raise CoordinationError("deadline_exceeded", "Workflow deadline has passed")
         return row
 
-    def begin_attempt(self, workflow_id: str, operation_id: str, owner: str) -> int:
+    def begin_attempt(
+        self, workflow_id: str, operation_id: str, owner: str, execution_token: int | None = None
+    ) -> int:
         with self.transaction() as db:
             row = self.active_workflow(db, workflow_id)
+            self.check_execution(db, workflow_id, execution_token)
+            task_specs = json.loads(row["specification"]).get("tasks", [])
+            task = next((t for t in task_specs if t["id"] == operation_id), None)
+            if task_specs and task is None:
+                raise CoordinationError("scope_violation", "Unknown task operation", 422)
+            if task:
+                attempts = db.execute(
+                    "SELECT count(*) FROM attempts WHERE workflow_id=? AND operation_id=?",
+                    (workflow_id, operation_id),
+                ).fetchone()[0]
+                if attempts >= task.get("max_attempts", 4):
+                    raise CoordinationError("attempts_exhausted", "Task attempt budget exhausted")
             if row["steps"] >= row["max_steps"]:
                 raise CoordinationError(
                     "step_budget_exceeded", "Workflow exhausted its attempt budget"
@@ -234,7 +242,7 @@ class Coordinator:
             db.execute("UPDATE workflows SET steps=steps+1 WHERE id=?", (workflow_id,))
             attempt_id = db.execute(
                 "INSERT INTO attempts(workflow_id,operation_id,owner,status,created_at) VALUES (?,?,?,'pending',?)",
-                (workflow_id, operation_id, owner, time.time()),
+                (workflow_id, operation_id, owner, self.now(db)),
             ).lastrowid
             self.event(
                 db,
@@ -251,10 +259,12 @@ class Coordinator:
                 (workflow_id, operation_id),
             ).fetchone()[0]
 
-    def finish(self, workflow_id: str, status: str):
+    def finish(self, workflow_id: str, status: str, execution_token: int | None = None):
         if status not in {"completed", "failed", "cancelled"}:
             raise ValueError("Invalid terminal status")
         with self.transaction() as db:
+            if execution_token is not None:
+                self.check_execution(db, workflow_id, execution_token)
             updated = db.execute(
                 "UPDATE workflows SET status=? WHERE id=? AND status='running'",
                 (status, workflow_id),
@@ -276,7 +286,7 @@ class Coordinator:
     def acquire(self, request: LeaseRequest) -> Lease:
         keys = sorted(set(request.resources))
         with self.transaction() as db:
-            now = time.time()
+            now = self.now(db)
             for key in keys:
                 if not db.execute("SELECT 1 FROM resources WHERE key=?", (key,)).fetchone():
                     raise CoordinationError("resource_missing", f"Unknown resource {key}", 404)
@@ -290,7 +300,7 @@ class Coordinator:
             expiry = now + request.ttl_seconds
             for key in keys:
                 db.execute(
-                    "INSERT OR REPLACE INTO leases VALUES (?,?,?,?)",
+                    "INSERT INTO leases VALUES (?,?,?,?) ON CONFLICT(resource) DO UPDATE SET owner=excluded.owner,token=excluded.token,expires_at=excluded.expires_at",
                     (key, request.owner, token, expiry),
                 )
             self.event(
@@ -319,6 +329,7 @@ class Coordinator:
             {
                 "reads": {k: v.model_dump() for k, v in request.reads.items()},
                 "plan": request.plan.model_dump(),
+                "acknowledgements": [a.id for a in request.acknowledgements],
             }
         )
         try:
@@ -335,6 +346,7 @@ class Coordinator:
                         )
                     return json.loads(existing["result"])
                 workflow = self.active_workflow(db, request.workflow_id)
+                self.check_execution(db, request.workflow_id, request.execution_token)
                 attempt = db.execute(
                     "SELECT * FROM attempts WHERE id=?", (request.attempt_id,)
                 ).fetchone()
@@ -348,12 +360,23 @@ class Coordinator:
                         "invalid_attempt",
                         "Commit needs a pending, budgeted attempt for this owner and operation",
                     )
+                specification = json.loads(workflow["specification"])
+                tasks = specification.get("tasks", [])
+                task = next((t for t in tasks if t["id"] == request.operation_id), None)
+                if tasks and (
+                    task is None
+                    or set(request.reads) != set(task["reads"])
+                    or {w.key for w in request.plan.writes} != set(task["writes"])
+                ):
+                    raise CoordinationError(
+                        "scope_violation", "Commit must match the persisted task scope", 422
+                    )
                 writes = {w.key: w for w in request.plan.writes}
                 if not writes.keys() <= request.reads.keys():
                     raise CoordinationError(
                         "blind_write", "Every write requires a snapshot version"
                     )
-                now = time.time()
+                now = self.now(db)
                 current = {}
                 for key, expected in request.reads.items():
                     lease = db.execute("SELECT * FROM leases WHERE resource=?", (key,)).fetchone()
@@ -393,10 +416,10 @@ class Coordinator:
                         )
                     )
                 rules = [
-                    ConservationRule.model_validate(rule)
+                    parse_rule(rule)
                     for rule in json.loads(workflow["specification"]).get("invariants", [])
                 ]
-                enforce_conservation(rules, current, {r.key: r for r in prepared})
+                enforce_rules(rules, current, {r.key: r for r in prepared})
                 transition = digest(
                     {
                         "reads": {
@@ -428,10 +451,14 @@ class Coordinator:
                         ),
                     )
                 db.execute(
-                    "INSERT INTO transitions VALUES (?,?,1) ON CONFLICT(workflow_id,fingerprint) DO UPDATE SET count=count+1",
+                    "INSERT INTO transitions VALUES (?,?,1) ON CONFLICT(workflow_id,fingerprint) DO UPDATE SET count=transitions.count+1",
                     (request.workflow_id, transition),
                 )
+                envelope_ids = self.stage_envelopes(db, request, specification)
+                for ack in request.acknowledgements:
+                    self.acknowledge_in_transaction(db, ack, request.workflow_id)
                 result = {
+                    "envelope_ids": envelope_ids,
                     "operation_id": request.operation_id,
                     "resources": {r.key: r.model_dump() for r in prepared},
                 }
@@ -473,10 +500,13 @@ class Coordinator:
             leases = [
                 dict(row)
                 for row in db.execute(
-                    "SELECT * FROM leases WHERE expires_at>? ORDER BY resource", (time.time(),)
+                    "SELECT * FROM leases WHERE expires_at>? ORDER BY resource", (self.now(db),)
                 )
             ]
-            totals = dict(db.execute("SELECT kind,count(*) FROM events GROUP BY kind").fetchall())
+            totals = {
+                r[0]: r[1]
+                for r in db.execute("SELECT kind,count(*) FROM events GROUP BY kind").fetchall()
+            }
         return {
             "resources": [r.model_dump() for r in self.snapshot().values()],
             "workflows": workflows,
@@ -489,7 +519,7 @@ class Coordinator:
     ) -> list[dict]:
         with self.connection() as db:
             rows = db.execute(
-                "SELECT * FROM events WHERE sequence>? AND (? IS NULL OR workflow_id=?) ORDER BY sequence LIMIT ?",
+                "SELECT * FROM events WHERE sequence>? AND (CAST(? AS TEXT) IS NULL OR workflow_id=?) ORDER BY sequence LIMIT ?",
                 (after, workflow_id, workflow_id, limit),
             ).fetchall()
         return [{**dict(row), "payload": json.loads(row["payload"])} for row in rows]

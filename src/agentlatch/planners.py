@@ -13,7 +13,7 @@ from .runtime import require_runtime
 class ScriptedPlanner:
     """Explicit offline simulation. Uses the exact same commit path as CrewAI."""
 
-    async def plan(self, task, snapshot):
+    async def plan(self, task, snapshot, messages=None):
         await asyncio.sleep(0.03 if task.action == "migrate" else 0.12)
         writes = []
         for key in task.writes:
@@ -40,6 +40,7 @@ class ScriptedPlanner:
                 value = {"observed": source.value}
             writes.append(Write(key=key, value=value, json_schema=schema))
         return Plan(
+            envelopes=task.emits,
             writes=writes,
             rationale=f"Offline simulation: {task.action} after reading current schema",
         )
@@ -48,11 +49,12 @@ class ScriptedPlanner:
 class CrewPlanner:
     """One isolated CrewAI worker per attempt; cancellation terminates inference locally."""
 
-    async def plan(self, task, snapshot):
+    async def plan(self, task, snapshot, messages=None):
         await asyncio.to_thread(require_runtime)
         payload = json.dumps(
             {
                 "task": task.model_dump(),
+                "messages": messages or [],
                 "snapshot": {k: r.model_dump() for k, r in snapshot.items()},
             }
         )

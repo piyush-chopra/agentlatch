@@ -14,12 +14,20 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import Field
 
 from .coordinator import Coordinator
-from .demo import demo_spec
-from .engine import Engine
+from .demo import demo_spec, handoff_spec
 from .errors import CoordinationError
-from .models import Commit, LeaseRequest, Model, ResourceCreate, WorkflowCreate, WorkflowSpec
-from .planners import CrewPlanner, ScriptedPlanner
+from .models import (
+    Commit,
+    DeliveryAck,
+    Key,
+    LeaseRequest,
+    Model,
+    ResourceCreate,
+    WorkflowCreate,
+    WorkflowSpec,
+)
 from .runtime import require_runtime, runtime_status
+from .scheduler import Scheduler
 
 
 class RunRequest(Model):
@@ -34,25 +42,44 @@ class DemoRequest(Model):
 
 
 class AttemptRequest(Model):
+    execution_token: int | None = Field(default=None, ge=1)
     operation_id: str = Field(min_length=1, max_length=160)
     owner: str = Field(min_length=1, max_length=160)
 
 
+class ChannelRequest(Model):
+    destination: Key
+    kind: Literal["message", "effect"]
+    schema_version: int = Field(default=1, ge=1)
+    json_schema: dict
+
+
+class DeliveryClaim(Model):
+    kind: Literal["message", "effect"]
+    destination: Key
+    owner: Key
+    ttl_seconds: float = Field(default=30, ge=0.05, le=300)
+    workflow_id: Key | None = None
+
+
 def create_app(db_path: str | None = None) -> FastAPI:
     coordinator = Coordinator(db_path or os.getenv("AGENTLATCH_DB", ".agentlatch/state.db"))
-    jobs: dict[str, asyncio.Task] = {}
+    scheduler = Scheduler(coordinator, max_runs=int(os.getenv("AGENTLATCH_MAX_RUNS", "4")))
+    jobs = scheduler.jobs
     token = os.getenv("AGENTLATCH_API_TOKEN", "")
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        for job in jobs.values():
-            job.cancel()
-        await asyncio.gather(*jobs.values(), return_exceptions=True)
+        scheduler.start()
+        try:
+            yield
+        finally:
+            await scheduler.close()
 
     app = FastAPI(title="AgentLatch", version="0.1.0", lifespan=lifespan)
     app.state.coordinator = coordinator
     app.state.jobs = jobs
+    app.state.scheduler = scheduler
 
     @app.exception_handler(CoordinationError)
     async def coordination_error(request: Request, exc: CoordinationError):
@@ -69,6 +96,40 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/health")
     def health():
         return {"status": "ok", "version": "0.1.0"}
+
+    @app.get("/api/executions", dependencies=auth)
+    def executions():
+        return {
+            "claims": coordinator.execution_status(),
+            "scheduler_errors": scheduler.errors,
+            "backend": "postgresql" if coordinator.storage.postgres else "sqlite",
+        }
+
+    @app.post("/api/channels", dependencies=auth, status_code=201)
+    def channel(body: ChannelRequest):
+        coordinator.register_channel(
+            body.destination, body.kind, body.schema_version, body.json_schema
+        )
+        return {"registered": True}
+
+    @app.get("/api/deliveries", dependencies=auth)
+    def deliveries(limit: int = Query(100, ge=1, le=1000)):
+        return coordinator.deliveries(limit)
+
+    @app.post("/api/deliveries/claim", dependencies=auth)
+    def delivery_claim(body: DeliveryClaim):
+        return coordinator.claim_delivery(
+            body.kind, body.destination, body.owner, body.ttl_seconds, body.workflow_id
+        )
+
+    @app.post("/api/deliveries/ack", dependencies=auth)
+    def delivery_ack(body: DeliveryAck):
+        return coordinator.acknowledge(body)
+
+    @app.post("/api/deliveries/retry", dependencies=auth)
+    def delivery_retry(body: DeliveryAck):
+        coordinator.reject_delivery(body)
+        return {"released": True}
 
     @app.get("/api/runtime", dependencies=auth)
     def runtime():
@@ -100,7 +161,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.post("/api/workflows/{workflow_id}/attempts", dependencies=auth)
     def attempt(workflow_id: str, body: AttemptRequest):
-        return {"attempt_id": coordinator.begin_attempt(workflow_id, body.operation_id, body.owner)}
+        return {
+            "attempt_id": coordinator.begin_attempt(
+                workflow_id, body.operation_id, body.owner, body.execution_token
+            )
+        }
 
     @app.post("/api/leases", dependencies=auth)
     def acquire(body: LeaseRequest):
@@ -137,21 +202,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         )
         if existing["status"] != "running":
             return {"id": run_id, "status": existing["status"]}
-        planner = CrewPlanner() if body.mode == "crew" else ScriptedPlanner()
-
-        async def work():
-            try:
-                return await Engine(coordinator, planner).run(body.spec, run_id)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                coordinator.record(run_id, "run_error", {"type": type(exc).__name__})
-                coordinator.finish(run_id, "failed")
-                return {"id": run_id, "status": "failed"}
-
-        jobs[run_id] = asyncio.create_task(work())
-        # Keep only active jobs; durable state is stored in SQLite.
-        jobs[run_id].add_done_callback(lambda done: jobs.pop(run_id, None))
+        coordinator.enqueue(run_id, body.mode)
         return {"id": run_id, "status": "running"}
 
     @app.post("/api/runs", dependencies=auth, status_code=202)
@@ -165,9 +216,20 @@ def create_app(db_path: str | None = None) -> FastAPI:
             spec = spec.model_copy(update={"timeout_seconds": 900})
         return await launch(RunRequest(spec=spec, mode=body.mode))
 
+    @app.post("/api/demos/handoff", dependencies=auth, status_code=202)
+    async def handoff():
+        spec = handoff_spec()
+        for task in spec.tasks:
+            for envelope in task.emits:
+                coordinator.register_channel(
+                    envelope.destination, envelope.kind, 1, {"type": "object"}
+                )
+        return await launch(RunRequest(spec=spec, mode="scripted"))
+
     @app.get("/api/runs/{run_id}", dependencies=auth)
     def run_status(run_id: str):
         result = coordinator.get_workflow(run_id)
+        result["task_outcomes"] = coordinator.task_outcomes(run_id)
         result["specification"] = __import__("json").loads(result["specification"])
         return result
 
