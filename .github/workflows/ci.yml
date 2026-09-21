@@ -27,3 +27,15 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --prefix frontend
       - run: npm run build --prefix frontend
+  crew-adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --extra crew --group dev
+      - run: uv run --extra crew pytest tests/test_crew_adapter.py -q
+        env:
+          OTEL_SDK_DISABLED: 'true'
+          CREWAI_TELEMETRY_DISABLED: 'true'
